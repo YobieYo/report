@@ -18,3 +18,15 @@ class DepartmentRepository(BaseRepository[Department]):
         for program in department.programs:
             programs.append(program)
         return programs
+
+    def get_active_programs_for_department(self, department_id: int) -> List[Program]:
+        department = db.session.query(Department).get(department_id)
+        
+        if not department:
+            return []
+
+        active_programs = []
+        for program in department.programs:
+            if program.is_active:
+                active_programs.append(program)
+        return active_programs

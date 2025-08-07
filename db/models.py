@@ -21,7 +21,7 @@ class Program(db.Model):
     id = db.Column(db.Integer, primary_key=True, index=True)
     name = db.Column(db.String, unique=True, index=True)
     observation_duration = db.Column(db.String)
-    is_active = db.Column(db.Boolean, default=False, index=True)
+    is_active = db.Column(db.Boolean, default=False, index=True, nullable=False)
     
     tractors = db.relationship(
         "Tractor", 
@@ -35,7 +35,7 @@ class Program(db.Model):
         back_populates="programs"
     )
     
-    # Change to one-to-many (a program can have multiple reports)
+    # One-to-many (a program can have multiple reports)
     reports = db.relationship("Report", back_populates="program", cascade="all, delete-orphan")
 
 class Tractor(db.Model):

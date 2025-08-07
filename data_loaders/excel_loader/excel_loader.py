@@ -48,7 +48,6 @@ class ExcelLoader(AbstractLoader):
 
             duration = row['Примечание']
             for each in name:
-                print(each)
                 program_repository.create(name = str(each), observation_duration = duration)
         return None
 
@@ -61,7 +60,6 @@ class ExcelLoader(AbstractLoader):
 
         df = self.df_web.dropna(
             subset=['Модель трактора', '№ трактора', 'Граничная дата гарантии', 'Опытный узел'])
-        k=0
         for i, row in df.iterrows():
             model_name = row['Модель трактора']
             serial_number = row['№ трактора']
@@ -80,18 +78,16 @@ class ExcelLoader(AbstractLoader):
                 
                 
                 if program is not None:
-                    k=+1
                     program_repository.add_tractor_to_program(
                         program_id = program.id,
                         tractor_id = tractor_id
                     )
-                    if program.is_active is False:
-                        program_repository.update(
+                    if program.is_active == False:
+                        program_repository.set_active(
                             program_id = program.id,
-                            is_active = True
                         )
-                    
-        print(f'привязано {k} тракторов к программам')
+
+                
             
         return None
 

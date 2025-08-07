@@ -24,7 +24,7 @@ class MergeReportBuilder(AbstractDrawer):
                 department.name
             )
 
-            programs = department_repository.get_programs_for_department(department.id)
+            programs = department_repository.get_active_programs_for_department(department.id)
 
             self.create_header(ws,programs)
 
@@ -43,6 +43,9 @@ class MergeReportBuilder(AbstractDrawer):
                 },
                 len(programs) + 3
             )
+
+            self.create_table(ws, programs, len(programs) + 4)
+                
 
 
                 
@@ -89,6 +92,22 @@ class MergeReportBuilder(AbstractDrawer):
         
 
 
-    def create_table(self, sheet, columns):
-        pass
+    def create_table(self, sheet, programs, start_row):
+        
+        for each in programs:
+            for i, report in enumerate(each.reports):
+                sheet.cell(row=i+start_row, column=1).value = report.tractor.model_name
+                sheet.cell(row=i+start_row, column=2).value = report.tractor.serial_number
+                sheet.cell(row=i+start_row, column=3).value = report.program.name
+
+                sheet.cell(row=i+start_row, column=4).value = report.report_time
+                sheet.cell(row=i+start_row, column=5).value = report.program.observation_duration
+                sheet.cell(row=i+start_row, column=6).value = report.operating_hours
+
+                sheet.cell(row=i+start_row, column=7).value = report.defect_detected_at_hours
+                sheet.cell(row=i+start_row, column=8).value = report.comment
+                sheet.cell(row=i+start_row, column=9).value = report.tractor.warranty_expire_date
+
+
+
 

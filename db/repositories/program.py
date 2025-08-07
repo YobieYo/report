@@ -1,5 +1,6 @@
-from ..models import Program, db
+from ..models import Program, db, Report
 from .base import BaseRepository
+from typing import List
 
 class ProgramRepository(BaseRepository[Program]):
     def __init__(self):
@@ -35,3 +36,25 @@ class ProgramRepository(BaseRepository[Program]):
             The Program object if found, None otherwise.
         """
         return Program.query.filter_by(name=name).first()
+    
+    def get_active_programs(self) -> list[Program]:
+        return Program.query.filter_by(is_active=True).all()
+    
+    def set_active(self, program_id):
+        program = Program.query.filter_by(id=program_id).first()
+        if program:
+            if program.is_active == False:
+                program.is_active = True
+                db.session.commit()
+        return program
+    
+    def get_reports(self, program_id) -> List[Report]:
+        program = Program.query.filter_by(id=program_id).first()
+
+        if program:
+            if program.reports:
+                return program.reports      
+        else:
+            return []
+
+

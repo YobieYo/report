@@ -17,14 +17,16 @@ def create_app():
     
     # Создание таблиц при первом запуске
     with app.app_context():
+        db.drop_all()
         db.create_all()
     
     configure_routes(app)
 
-    migrate = Migrate(app, db) 
+    migrate = Migrate(app, db)
 
-
-
+    db.session.close_all()
+    
+    
     @app.get('/launch_test')
     def test_launch():
         loader = ExcelLoader(
