@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Форматировать отчет</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="container nav-container">
+            <img src="{{ url_for('static', filename='logo.jpg') }}" class="logo">
+            <div class="nav-links">
+                <a href="/merge-files" class="nav-link">Объединить отчеты</a>
+                <a href="/format-file" class="nav-link active">Форматировать отчет</a>
+                <a href='/documentation' class="nav-link">Документация</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            <div class="card">
+                <h1 class="title">Форматировать отчет</h1>
+                
+                <div class="upload-area">                    
+                    <div class="file-input-wrapper">
+                        <input type="file" id="web-file" class="file-input" accept=".xlsx, .xls">
+                        <label for="web-file" class="file-input-label">
+                            <div class="file-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <rect x="8" y="13" width="8" height="5" rx="1"></rect>
+                                </svg>
+                            </div>
+                            <div class="file-text">Загрузите файл Excel</div>
+                            <div class="file-hint">в формате XLSX</div>
+                            <div class="file-name" id="web-filename"></div>
+                        </label>
+                    </div>
+                </div>
+                
+                <button id="merge-button" class="button" disabled>Объединить отчеты</button>
+                
+                <div class="loading-bar" id="loading-bar">
+                    <div class="loading-progress" id="loading-progress"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal -->
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <h3 class="modal-title">Объединение отчетов</h3>
+            <p class="modal-text">Отчеты успешно объединены. Хотите скачать результат?</p>
+            <div class="modal-actions">
+                <button class="modal-button cancel">Отмена</button>
+                <button class="modal-button confirm">Скачать</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const bitrixFileInput = document.getElementById('bitrix-file');
+            const webFileInput = document.getElementById('web-file');
+            const bitrixFilename = document.getElementById('bitrix-filename');
+            const webFilename = document.getElementById('web-filename');
+            const mergeButton = document.getElementById('merge-button');
+            const modal = document.getElementById('modal');
+            const loadingBar = document.getElementById('loading-bar');
+            const loadingProgress = document.getElementById('loading-progress');
+            
+            // File input handlers
+            bitrixFileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    bitrixFilename.textContent = this.files[0].name;
+                    bitrixFilename.style.display = 'block';
+                    checkFiles();
+                } else {
+                    bitrixFilename.style.display = 'none';
+                }
+            });
+            
+            webFileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    webFilename.textContent = this.files[0].name;
+                    webFilename.style.display = 'block';
+                    checkFiles();
+                } else {
+                    webFilename.style.display = 'none';
+                }
+            });
+            
+            // Check if both files are selected
+            function checkFiles() {
+                if (bitrixFileInput.files.length > 0 && webFileInput.files.length > 0) {
+                    mergeButton.disabled = false;
+                } else {
+                    mergeButton.disabled = true;
+                }
+            }
+            
+            // Merge button handler
+            mergeButton.addEventListener('click', function() {
+                // Show loading animation
+                loadingBar.style.display = 'block';
+                scrollTo(0, document.body.scrollHeight);
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 5;
+                    loadingProgress.style.width = `${progress}%`;
+                    
+                    if (progress >= 100) {
+                        clearInterval(interval);
+                        loadingBar.style.display = 'none';
+                        loadingProgress.style.width = '0';
+                        modal.classList.add('active');
+                    }
+                }, 100);
+            });
+            
+            // Modal handlers
+            document.querySelector('.modal-button.cancel').addEventListener('click', function() {
+                modal.classList.remove('active');
+            });
+            
+            document.querySelector('.modal-button.confirm').addEventListener('click', function() {
+                modal.classList.remove('active');
+                // Here you would typically trigger the file download
+                alert('Файл успешно скачан!');
+            });
+        });
+    </script>
+</body>
+</html>

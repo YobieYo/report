@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Документация</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="container nav-container">
+            <img src="{{ url_for('static', filename='logo.jpg') }}" class="logo">
+            <div class="nav-links">
+                <a href="/merge-files" class="nav-link">Объединить отчеты</a>
+                <a href="/format-file" class="nav-link">Форматировать отчет</a>
+                <a href='/documentation' class="nav-link active">Документация</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main">
+        <h1>Скоро появится</h1>
+    </main>
+
+</body>
+</html>
