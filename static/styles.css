@@ -11,6 +11,13 @@
     --background: #f5f5f5;
     --hover-container: #fdfdfd;
 }
+.inactive {
+    visibility: hidden;
+}
+
+
+
+
 
 * {
     margin: 0;

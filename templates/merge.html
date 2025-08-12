@@ -72,10 +72,10 @@
     <div class="modal" id="modal">
         <div class="modal-content">
             <h3 class="modal-title">Объединение отчетов</h3>
-            <p class="modal-text">Отчеты успешно объединены. Хотите скачать результат?</p>
+            <p class="modal-text" id="modal_text">Отчеты успешно объединены. Хотите скачать результат?</p>
             <div class="modal-actions">
                 <button class="modal-button cancel">Отмена</button>
-                <button class="modal-button confirm">Скачать</button>
+                <a class="modal-button confirm inactive" href="#" id="download-btn">Скачать</a>
             </div>
         </div>
     </div>
@@ -89,9 +89,14 @@
             const bitrixFilename = document.getElementById('bitrix-filename');
             const webFilename = document.getElementById('web-filename');
             const mergeButton = document.getElementById('merge-button');
+
             const modal = document.getElementById('modal');
+            const modal_text = document.getElementById('modal_text');
+
             const loadingBar = document.getElementById('loading-bar');
             const loadingProgress = document.getElementById('loading-progress');
+
+            const downloadBtn = document.getElementById('download-btn');
             
             // File input handlers
             bitrixFileInput.addEventListener('change', function() {
@@ -129,24 +134,21 @@
                 loadingBar.style.display = 'block';
 
                 const formData = new FormData();
-                formData.append('bitrix_file', bitrixFileInput.files[0]);
                 formData.append('web_file', webFileInput.files[0]);
+                formData.append('bitrix_file', bitrixFileInput.files[0]);
 
+                // Выводим модальное окно
+                modal.classList.add('active');
+                modal_text.textContent = 'Объединение отчетов...';
 
                 ApiService.sendMergeRequest(formData)
-
-                let progress = 0;
-                const interval = setInterval(() => {
-                    progress += 5;
-                    loadingProgress.style.width = `${progress}%`;
-                    
-                    if (progress >= 100) {
-                        clearInterval(interval);
-                        loadingBar.style.display = 'none';
-                        loadingProgress.style.width = '0';
-                        modal.classList.add('active');
-                    }
-                }, 100);
+                    .then(response => {
+                        modal_text.textContent = response.message;
+                        if (response.download_link) {
+                            downloadBtn.href = `/download?link=${response.download_link}`;
+                            downloadBtn.classList.remove('inactive');
+                        }
+                    })
             });
             
             // Modal handlers
@@ -157,7 +159,7 @@
             document.querySelector('.modal-button.confirm').addEventListener('click', function() {
                 modal.classList.remove('active');
                 // Here you would typically trigger the file download
-                alert('Файл успешно скачан!');
+                location.reload();
             });
             
         });
