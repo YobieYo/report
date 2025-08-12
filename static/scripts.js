@@ -1,7 +1,7 @@
 export class ApiService {
-    static async sendMergeRequest(formData) {
+    static async sendMergeRequest(formData, base_url) {
         const response = await fetch(
-            '/merge-files', {
+            `${base_url}`, {
                 method: 'POST',
                 body: formData,
             }

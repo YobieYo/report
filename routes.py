@@ -1,11 +1,13 @@
-from flask import redirect, render_template, jsonify, request, send_file
+from flask import redirect, render_template, jsonify, request, send_file, Blueprint, url_for
 from controllers import *
-from schemas import FormatSchema, MergeSchema, DownloadSchema, ErrorSchema, SuccesSchema
-def configure_routes(app):
+from schemas import FormatSchema, MergeSchema, ErrorSchema
+import os
 
+def configure_routes(app):
+    base = os.environ.get('BASE_URL')
     # ======================== Logic Routes ========================
 
-    @app.post('/merge-files')
+    @app.post(f'/merge-files')
     def send_merge_files():
         try:
             print('пришел запрос на merge')
@@ -33,7 +35,7 @@ def configure_routes(app):
             )
             return jsonify(response.model_dump())
 
-    @app.post('/format-file')
+    @app.post(f'/format-file')
     def send_format_file():
         try:
             # - валидация -
@@ -47,15 +49,14 @@ def configure_routes(app):
             )
             return jsonify(error.model_dump())
 
-    @app.get('/download')
+    @app.get(f'/download')
     def download_file():
         print('пришел запрос на скачивание')
         link = request.args.get('link')
-        upload_folder = os.environ.get('UPLOAD_FOLDER')
         print(f'ссылка = {link}')
 
         return send_file(
-            f'uploads\\{link}',
+            f'uploads/{link}',
         )
 
 
@@ -63,22 +64,22 @@ def configure_routes(app):
     # ======================== Static Routes ========================
 
     # -- Главная страница --
-    @app.get("/")
+    @app.get(f'/')
     def index():
-        return redirect('/merge-files')
+        return redirect(f'/merge-files')
     
     # -- Объединить файлы --
-    @app.get('/merge-files')
+    @app.get(f'/merge-files')
     def merge_files():
         return render_template('merge.html')
     
     # -- Форматировать файл --
-    @app.get('/format-file')
+    @app.get(f'/format-file')
     def format_file():
         return render_template('format.html')
     
     # -- Документация --
-    @app.get('/documentation')
+    @app.get(f'/documentation')
     def documentation():
         return render_template('doc.html')
 
