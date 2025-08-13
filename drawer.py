@@ -13,31 +13,51 @@ class drawer(ABC):
         pass
 
 class MergeDrawer(drawer):
-    def __init__(self, web_df : pd.DataFrame, bitrix_df : pd.DataFrame):
+    def __init__(
+        self,
+        web_df: pd.DataFrame,
+        bitrix_df: pd.DataFrame,
+        config: dict | None = None,
+        config_path: str = 'report_config.json',
+    ):
         self.web_df = web_df
         self.bitrix_df = bitrix_df
-        with open('report_config.json', 'r', encoding='utf-8') as file:
-            self.config = json.load(file)
+
+        if config is not None:
+            self.config = config
+        else:
+            with open(config_path, 'r', encoding='utf-8') as file:
+                self.config = json.load(file)
 
     def _merge_content(self):
-
         bitrix_cols = self.config['bitrix_columns']
         self.bitrix_df = self.bitrix_df.loc[:, bitrix_cols]
-        
+
         web_cols = self.config['web_columns']
         self.web_df = self.web_df.loc[:, web_cols]
 
+        # нормализация
         self.bitrix_df['Название'] = self.bitrix_df['Название'].str[4:]
-        self.web_df[['№ трактора', 'Опытный узел', ]] = self.web_df[['№ трактора', 'Опытный узел']].ffill()
+        self.web_df[['№ трактора', 'Опытный узел']] = self.web_df[['№ трактора', 'Опытный узел']].ffill()
 
+        # берём «Бюро» из web (правый df), bitrix-поле — если нужно — уходит в _bitrix
         result_df = pd.merge(
             self.bitrix_df,
             self.web_df,
-            left_on = 'Название',
-            right_on = 'Опытный узел',
-            how = 'right',
-        ).ffill()
+            left_on='Название',
+            right_on='Опытный узел',
+            how='right',
+            suffixes=('_bitrix', '')  # правый без суффикса
+        )
+
+        result_df = result_df.ffill().bfill()
+
+        # если из bitrix тоже пришло «Бюро», удалим его
+        if 'Бюро_bitrix' in result_df.columns and 'Бюро' in result_df.columns:
+            result_df = result_df.drop(columns=['Бюро_bitrix'])
+
         return result_df
+
 
     
     def _reformat_dataframe(self, df: pd.DataFrame, column_map: dict) -> pd.DataFrame:
