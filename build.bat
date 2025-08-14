@@ -1,15 +1,18 @@
 @echo off
 setlocal enabledelayedexpansion
 
+REM Запускаем тесты
 echo Running tests with coverage...
-pytest > coverage_output.txt 2>&1
+pytest --cov > coverage_output.txt 2>&1
 
+REM Проверяем пройдены ли тесты
 if %ERRORLEVEL% neq 0 (
     echo Tests failed, docker build will not be executed
     type coverage_output.txt
     exit /b 1
 )
 
+REM Достаем процент покрытия тестами
 echo Extracting coverage percentage...
 for /f "tokens=*" %%a in ('findstr /C:"TOTAL" coverage_output.txt') do (
     for /f "tokens=4" %%b in ("%%a") do (
@@ -26,9 +29,11 @@ if not defined coverage (
 
 echo Total coverage: !coverage!%%
 
+REM Собираем Docker образ и запускаем Docker Compose при покрытии тестами выше 55%
 if !coverage! geq 55 (
     echo Coverage is sufficient (^>=55%%^). Building Docker...
     docker build -t flask-report:test .
+    del coverage_output.txt
     cd C:\Users\Aleksandr\Documents\Work\ServerPTZ
     docker compose -f docker-compose.yml up -d --build
 ) else (
@@ -37,5 +42,3 @@ if !coverage! geq 55 (
 )
 
 
-
-del coverage_output.txt

@@ -91,15 +91,38 @@ class DataCleaner:
             time.sleep(60)
             now = datetime.now()
             for folder in self.folders:
-                for filename in os.listdir(folder):
-                    file_path = os.path.join(folder, filename)
-                    if os.path.isfile(file_path):
-                        file_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
-                        if now - file_modified > timedelta(seconds=self.max_life_time):
-                            try:
-                                os.remove(file_path)
-                            except Exception as e:
-                                print('Не удалось удалить файл', file_path, e)
+                self._clean_folder(now, folder)
+
+    def _clean_folder(self, now: datetime, folder: str):
+        """
+        Вспомогательный метод для очистки отдельной папки.
+
+        Перебирает все файлы в указанной папке и вызывает `_delete_file`
+        для проверки и удаления старых файлов.
+
+        :param now: Текущее время.
+        :param folder: Путь к папке для очистки.
+        """
+        for filename in os.listdir(folder):
+            self._delete_file(now, folder, filename)
+
+    def _delete_file(self, now: datetime, folder: str, filename: str):
+        """
+        Проверяет возраст файла и удаляет его, если он старше заданного времени.
+
+        :param now: Текущее время.
+        :param folder: Путь к папке, где находится файл.
+        :param filename: Имя файла.
+        """
+        file_path = os.path.join(folder, filename)
+        if os.path.isfile(file_path):
+            file_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
+            if now - file_modified > timedelta(seconds=self.max_life_time):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    print('Не удалось удалить файл', file_path, e)
+
 
 
 def create_app():
