@@ -2,7 +2,7 @@ import os
 import json
 import pandas as pd
 from pathlib import Path
-from drawer import MergeDrawer
+from app.drawer import MergeDrawer, Utils
 
 class DummySchema:
     def __init__(self, message, download_link):
@@ -19,10 +19,10 @@ def test_draw_report_integration(tmp_path, monkeypatch):
         # файл создастся внутри _format_excel_report, здесь только возвращаем пути
         return str(out), link
 
-    monkeypatch.setattr('drawer.Utils.create_save_file', fake_create_save_file)
+    monkeypatch.setattr('app.drawer.Utils.create_save_file', fake_create_save_file)
 
     # Подменим SuccesSchema на простой класс, чтобы не тянуть зависимости
-    monkeypatch.setattr('drawer.SuccesSchema', DummySchema)
+    monkeypatch.setattr('app.drawer.SuccesSchema', DummySchema)
 
     # Мокаем конфиг, чтобы не читать файл
     config = {

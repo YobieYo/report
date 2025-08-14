@@ -1,0 +1,29 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.1, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\Aleksandr\Documents\Work\NewReport
+configfile: pytest.ini
+testpaths: tests
+plugins: cov-6.2.1, flask-1.3.0
+collected 10 items
+
+tests\test_controller.py .                                               [ 10%]
+tests\test_draw_report.py .                                              [ 20%]
+tests\test_excel.py .                                                    [ 30%]
+tests\test_merge.py .                                                    [ 40%]
+tests\test_reformat.py .                                                 [ 50%]
+tests\test_routes.py .....                                               [100%]
+
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.13.1-final-0 _______________
+
+Name                 Stmts   Miss  Cover   Missing
+--------------------------------------------------
+app\__init__.py         48     26    46%   31-32, 47-52, 75-77, 89-102, 124
+app\controllers.py      21     11    48%   31-60
+app\drawer.py          104      4    96%   26, 59-60, 242
+app\routes.py           43     20    53%   31-55, 66-76, 87-88
+app\schemas.py          28      9    68%   29-31, 44-46, 70-72
+app\utils.py            34     22    35%   27-34, 48-51, 76-86
+--------------------------------------------------
+TOTAL                  278     92    67%
+============================= 10 passed in 1.47s ==============================

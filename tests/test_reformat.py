@@ -1,5 +1,5 @@
 import pandas as pd
-from drawer import MergeDrawer
+from app.drawer import MergeDrawer
 
 def test_reformat_dataframe_keeps_renames_and_orders_columns():
     df = pd.DataFrame({

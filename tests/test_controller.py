@@ -1,5 +1,5 @@
 from .confest import client, app
-from controllers import MergeController, FormatController
+from app.controllers import MergeController, FormatController
 
 class TestMergeController:
 

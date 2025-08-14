@@ -1,5 +1,5 @@
 from flask import Flask, request
-from routes import configure_routes
+from .routes import configure_routes
 import os
 from typing import List
 import time
@@ -133,17 +133,3 @@ def create_app():
 
 
 
-
-if __name__ == '__main__':
-    # Запускаем уборщик данных в отдельном потоке
-    cleaner = DataCleaner(
-        folders=[os.environ.get('UPLOAD_FOLDER', 'uploads')],
-        max_life_time=1
-    )
-    cleaner_thread = Thread(target=cleaner.clean_data)
-    cleaner_thread.daemon = True
-    cleaner_thread.start(),
-
-    # Запускаем приложение 
-    app = create_app()
-    app.run(debug=False)

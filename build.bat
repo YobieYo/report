@@ -2,36 +2,40 @@
 setlocal enabledelayedexpansion
 
 echo Running tests with coverage...
-pytest --cov=drawer --cov=app --cov=controllers --cov=routes --cov-report term --cov-report html > coverage_output.txt
+pytest > coverage_output.txt 2>&1
 
 if %ERRORLEVEL% neq 0 (
     echo Tests failed, docker build will not be executed
+    type coverage_output.txt
     exit /b 1
 )
 
 echo Extracting coverage percentage...
-for /f "tokens=4 delims= " %%a in ('type coverage_output.txt ^| find "TOTAL"') do (
-    set coverage=%%a
-    set coverage=!coverage:~0,-1!
+for /f "tokens=*" %%a in ('findstr /C:"TOTAL" coverage_output.txt') do (
+    for /f "tokens=4" %%b in ("%%a") do (
+        set coverage=%%b
+        set coverage=!coverage:~0,-1!
+    )
+)
+
+if not defined coverage (
+    echo Could not determine coverage from output:
+    type coverage_output.txt
+    exit /b 1
 )
 
 echo Total coverage: !coverage!%%
 
-if !coverage! gtr 55 (
-    echo Total coverage is >= 55%%
-    echo STARTING DOCKER BUILD
+if !coverage! geq 55 (
+    echo Coverage is sufficient (^>=55%%^). Building Docker...
     docker build -t flask-report:test .
+    cd C:\Users\Aleksandr\Documents\Work\ServerPTZ
+    docker compose -f docker-compose.yml up -d --build
 ) else (
-    echo Total coverage is insufficient docker build CANCELED
+    echo Coverage is too low (^<55%%^). Docker build canceled.
     exit /b 1
 )
 
+
+
 del coverage_output.txt
-del 70%%
-del 68%%
-del 55%%
-
-
-cd C:\Users\Aleksandr\Documents\Work\ServerPTZ
-
-docker compose -f docker-compose.yml up -d --build

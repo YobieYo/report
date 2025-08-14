@@ -1,5 +1,5 @@
 import pandas as pd
-from drawer import MergeDrawer
+from app.drawer import MergeDrawer
 
 def test_merge_content_basic_ffill_and_trim(monkeypatch):
     # Конфиг с нужными колонками

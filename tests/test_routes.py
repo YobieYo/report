@@ -1,4 +1,4 @@
-from routes import *
+from app.routes import *
 from flask import url_for
 from .confest import client, app, mock_result_file
 

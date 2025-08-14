@@ -1,6 +1,6 @@
 import pandas as pd
 from pathlib import Path
-from drawer import MergeDrawer
+from app.drawer import MergeDrawer
 
 def test_format_excel_report_smoke(tmp_path):
     df = pd.DataFrame({
