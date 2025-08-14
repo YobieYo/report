@@ -1,0 +1,6 @@
+/tests
+.coverage
+/htmlcov
+pytest.ini
+coverage_output.txt
+/venv

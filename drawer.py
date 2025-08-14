@@ -171,6 +171,7 @@ class MergeDrawer(drawer):
                     'Количество тракторов': name_counts['Количество тракторов']  # Колонка F (индекс 5)
                 })
 
+
                 # Записываем статистику
                 header_df.to_excel(
                     writer,
@@ -181,6 +182,22 @@ class MergeDrawer(drawer):
 
                 # Получаем объект листа
                 worksheet = writer.sheets[sheet_name]
+
+                for row_offset, value in enumerate(header_df['Опытный узел'], start=1):
+                    color = self._get_cell_color(value)
+                    
+                    if color not in format_dict:
+                        format_dict[color] = writer.book.add_format({'bg_color': color})
+                    
+                    # Правильно рассчитываем номер строки
+                    worksheet.merge_range(
+                        first_row = 0 + row_offset,
+                        first_col = 0,
+                        last_row = 0 + row_offset,
+                        last_col = 4,
+                        data = value,
+                        cell_format = format_dict[color],
+                    )
 
                 
 
@@ -212,9 +229,9 @@ class MergeDrawer(drawer):
                 worksheet.set_column('H:H', 104, )
                 worksheet.set_column('I:I', 18, )
 
-                
-
-               
+                group = group.drop(
+                    columns=['Бюро']
+                )
 
                 group.to_excel(
                     writer,
@@ -222,10 +239,8 @@ class MergeDrawer(drawer):
                     index=False,
                     startrow=start_row,
                 )
-
                 
                 colored_col = self.config["report_column_map"]["Опытный узел"][0]
-
 
 
                 for row_offset, value in enumerate(group['Опытный узел'], start=1):
@@ -236,12 +251,6 @@ class MergeDrawer(drawer):
                     
                     # Правильно рассчитываем номер строки
                     worksheet.write(start_row + row_offset, colored_col, value, format_dict[color])
-
-
-            
-                
-
-
 
     def _get_cell_color(self, value):
         """
