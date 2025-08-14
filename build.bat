@@ -35,6 +35,8 @@ if !coverage! geq 55 (
     docker build -t flask-report:test .
     del coverage_output.txt
     cd C:\Users\Aleksandr\Documents\Work\ServerPTZ
+
+    REM Запускаем многоконтейнерное приложение с Docker Compose
     docker compose -f docker-compose.yml up -d --build
 ) else (
     echo Coverage is too low (^<55%%^). Docker build canceled.
