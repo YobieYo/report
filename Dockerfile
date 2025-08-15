@@ -10,4 +10,4 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--forwarded-allow-ips", "*", "app:create_app()"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--forwarded-allow-ips", "*", "--config", "gunicorn.conf.py", "app:create_app()"]

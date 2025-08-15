@@ -41,6 +41,7 @@
 ├── pytest.ini                    # Конфигурация pytest
 ├── requirements.txt              # Зависимости Python
 ├── Dockerfile                    # Конфигурация Docker образа
+├── gunicorn.conf.py              # Конфигурация Gunicorn для запуска очистки uploads в фоновом потоке
 ├── .dockerignore                 # Игнорируемые файлы для Docker
 ├── .gitignore                    # Игнорируемые файлы для Git
 ├── build.bat                     # CI/CD скрипт (тесты, покрытие, сборка Docker)

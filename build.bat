@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 REM Запускаем тесты
 echo Running tests with coverage...
-pytest --cov > coverage_output.txt 2>&1
+pytest --cov=app tests/ > coverage_output.txt 2>&1
 
 REM Проверяем пройдены ли тесты
 if %ERRORLEVEL% neq 0 (
@@ -30,11 +30,10 @@ if not defined coverage (
 echo Total coverage: !coverage!%%
 
 REM Собираем Docker образ и запускаем Docker Compose при покрытии тестами выше 55%
-if !coverage! geq 55 (
-    echo Coverage is sufficient (^>=55%%^). Building Docker...
+if !coverage! geq 80 (
+    echo Coverage is sufficient (^>=80%%^). Building Docker...
     docker build -t flask-report:test .
-    del coverage_output.txt
-    cd C:\Users\Aleksandr\Documents\Work\ServerPTZ
+    cd ../ServerPTZ
 
     REM Запускаем многоконтейнерное приложение с Docker Compose
     docker compose -f docker-compose.yml up -d --build

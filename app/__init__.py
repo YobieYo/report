@@ -45,8 +45,11 @@ class PrefixMiddleware:
         :rtype: iterable
         """
         if self.prefix:
-            environ['SCRIPT_NAME'] = self.prefix
+            # Эту часть пути Flask обрезает, для коректной работы маршрутов
+            environ['SCRIPT_NAME'] = self.prefix 
+            # Записываем путь запроса
             path_info = environ['PATH_INFO']
+            # Если путь начинается с префикса, обрезаем его
             if path_info.startswith(self.prefix):
                 environ['PATH_INFO'] = path_info[len(self.prefix):]
         return self.app(environ, start_response)
