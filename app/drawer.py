@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from .schemas import ErrorSchema, SuccesSchema
 import pandas as pd
 import json
-from .utils import Utils
+from .utils import Utils, DataFrameUtils, ExcelUtils
 import os
 from typing import Dict, List, Any
 class Drawer(ABC):
@@ -100,32 +100,6 @@ class MergeDrawer(Drawer):
 
         return result_df
 
-    def _reformat_dataframe(self, df: pd.DataFrame, column_map: Dict[str, List[Any]]) -> pd.DataFrame:
-        """
-        Переформатирует DataFrame согласно заданному отображению колонок.
-
-        :param df: Исходный DataFrame.
-        :param column_map: Словарь с новыми названиями и порядком колонок.
-        :return: Отформатированный DataFrame.
-        """
-        # Создаем словарь для переименования и отбора колонок
-        rename_dict = {}
-        columns_to_keep = []
-
-        for new_name, (index, old_name) in column_map.items():
-            if old_name in df.columns:
-                rename_dict[old_name] = new_name
-                columns_to_keep.append(old_name)
-
-        # Отбираем только нужные колонки и переименовываем их
-        df_filtered = df[columns_to_keep].rename(columns=rename_dict)
-
-        # Сортируем колонки согласно индексам из column_map
-        new_columns_order = [k for k, _ in sorted(column_map.items(), key=lambda x: x[1][0])]
-
-        # Возвращаем DataFrame только с нужными колонками в правильном порядке
-        return df_filtered[new_columns_order]
-
     def _format_excel_report(self, group_col_name: str, output_file: str) -> None:
         """
         Форматирует и сохраняет данные в Excel-файл с несколькими листами.
@@ -137,46 +111,15 @@ class MergeDrawer(Drawer):
 
         with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
 
-            total = pd.DataFrame(self.result_df.agg(
-                func={
-                    'Опытный узел': 'nunique',
-                    '№ трактора': 'nunique'
-                },
-            )).T.reset_index(drop=True)
-            total = total.rename(columns={
-                'Опытный узел': 'Число опытных узлов',
-                '№ трактора': 'Число тракторов'
-            })
-            total.to_excel(
-                excel_writer=writer,
-                sheet_name='Статистика',
-                index=False
-            )
+            # Создаем лист статистики
+            self._create_stats_sheet(writer)
 
-            result = self.result_df.groupby('Бюро').agg({
-                'Опытный узел': 'nunique',
-                '№ трактора': 'nunique'
-            }).reset_index()
-            result = result.rename(columns={
-                'Опытный узел': 'Число опытных узлов',
-                '№ трактора': 'Число тракторов'
-            })
-
-            result.to_excel(
-                excel_writer=writer,
-                sheet_name='Статистика',
-                index=False,
-                startrow=len(total) + 2,
-            )
-
-            writer.sheets['Статистика'].set_column('A:A', 56)
-            writer.sheets['Статистика'].set_column('B:B', 24)
-            writer.sheets['Статистика'].set_column('C:C', 24)
-
+            # Создаем листы по бюро
             for name, group in grouped:
                 sheet_name = str(name).replace(':', '').replace('\\', '').replace('/', '')[:31]
                 format_dict = {}
 
+                # расчитываем статистику в шапке
                 name_counts = (
                     group.groupby('Опытный узел')['№ трактора']
                     .nunique()
@@ -184,6 +127,7 @@ class MergeDrawer(Drawer):
                     .rename(columns={'№ трактора': 'Количество тракторов'})
                 )
 
+                # Шапка страницы
                 header_df = pd.DataFrame({
                     'Опытный узел': name_counts['Опытный узел'],
                     'Пусто1': '',
@@ -193,13 +137,19 @@ class MergeDrawer(Drawer):
                     'Количество тракторов': name_counts['Количество тракторов']
                 })
 
+                # Записываем шапку в Excel
                 header_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=0)
                 worksheet = writer.sheets[sheet_name]
 
+                # Форматируем шапку
                 for row_offset, value in enumerate(header_df['Опытный узел'], start=1):
-                    color = self._get_cell_color(value)
+                    color = ExcelUtils.get_cell_color(value)
                     if color not in format_dict:
-                        format_dict[color] = writer.book.add_format({'bg_color': color})
+                        format_dict[color] = writer.book.add_format({
+                            'bg_color': color, 
+                            'valign': 'vcenter',
+                            'border': 1,
+                            })
                     worksheet.merge_range(
                         first_row=0 + row_offset,
                         first_col=0,
@@ -209,6 +159,7 @@ class MergeDrawer(Drawer):
                         cell_format=format_dict[color],
                     )
 
+                # Создаем формат заголовков
                 header_format = writer.book.add_format({
                     'bold': True,
                     'align': 'center',
@@ -217,10 +168,12 @@ class MergeDrawer(Drawer):
                     'text_wrap': True,
                 })
 
+                # Создаем заголовок шапки страницы
                 worksheet.merge_range(0, 0, 0, 4, 'Программа ПЭ:', header_format)
                 worksheet.write(0, 5, 'Количество тракторов', header_format)
 
-                start_row = len(name_counts) + 3
+                # Задаем размеры колонкам
+                start_row = len(name_counts) + 4
                 worksheet.set_column('A:A', 16)
                 worksheet.set_column('B:B', 20)
                 worksheet.set_column('C:C', 56)
@@ -231,36 +184,131 @@ class MergeDrawer(Drawer):
                 worksheet.set_column('H:H', 104)
                 worksheet.set_column('I:I', 18)
 
+                # Убираем колонку бюро из таблицы
                 group = group.drop(columns=['Бюро'])
-                group.to_excel(writer, sheet_name=sheet_name, index=False, startrow=start_row)
+                
+                # Заполняем заголовок главной таблицы
+                for i, col in enumerate(group.columns):
+                    worksheet.write(
+                        start_row-1,
+                        i,
+                        col,
+                        header_format,
+                    )
+                
+                # Записываем главную таблицу
+                group.to_excel(
+                    writer,
+                    sheet_name=sheet_name,
+                    index=False,
+                    startrow=start_row,
+                    header=False,
+                    )
 
+                # Задаем какую колонку раскрашиваем
                 colored_col = self.config["report_column_map"]["Опытный узел"][0]
 
-                for row_offset, value in enumerate(group['Опытный узел'], start=1):
-                    color = self._get_cell_color(value)
+
+                # Раскрашиваем ячейки
+                for row_offset, value in enumerate(group['Опытный узел'], 0):
+                    color = ExcelUtils.get_cell_color(value)
                     if color not in format_dict:
-                        format_dict[color] = writer.book.add_format({'bg_color': color})
+                        format_dict[color] = writer.book.add_format({
+                            'bg_color': color,
+                            'valign': 'vcenter',
+                            'border': 1,
+                            'text_wrap': True
+                            })
                     worksheet.write(start_row + row_offset, colored_col, value, format_dict[color])
 
-    def _get_cell_color(self, value: str) -> str:
-        """
-        Генерирует HEX-цвет на основе хеша строки.
+                # Задаем форматирование для всех строк
+                cell_format = writer.book.add_format({
+                    'text_wrap': True,
+                    'valign': 'vcenter',
+                    'border': 1,
+                })
 
-        :param value: Входная строка.
-        :return: HEX-код цвета.
-        """
-        hash_integer = abs(hash(str(value)))
+                # Применяем форматирование ко всем строкам
+                print(f'Начальная строка форматирвоание{start_row}')
+                print(f'всего строк для форматирвания {group.shape[0]}')
+                for i in range(start_row, group.shape[0]):
+                    worksheet.set_row(
+                        i,
+                        None,
+                        cell_format,
+                    )
 
-        r = 150 + (hash_integer % 101) & 0xFF
-        g = 150 + ((hash_integer // 100) % 101)
-        b = 150 + ((hash_integer // 10000) % 101)
+    def _create_stats_sheet(self, writer):
+        # Create the total stats table
+        total = pd.DataFrame(self.result_df.agg(
+                func={
+                    'Опытный узел': 'nunique',
+                    '№ трактора': 'nunique'
+                },
+            )).T.reset_index(drop=True)
+        total = total.rename(columns={
+                'Опытный узел': 'Число опытных узлов',
+                '№ трактора': 'Число тракторов'
+            })
+        total.to_excel(
+                excel_writer=writer,
+                sheet_name='Статистика',
+                index=False
+            )
 
-        r = min(r, 255)
-        g = min(g, 255)
-        b = min(b, 255)
+        # Create the bureau stats table
+        result = self.result_df.groupby('Бюро').agg({
+                'Опытный узел': 'nunique',
+                '№ трактора': 'nunique'
+            }).reset_index()
+        result = result.rename(columns={
+                'Опытный узел': 'Число опытных узлов',
+                '№ трактора': 'Число тракторов'
+            })
 
-        hex_color = f"#{r:02x}{g:02x}{b:02x}"
-        return hex_color
+        # Write bureau stats table below the total stats
+        result.to_excel(
+                excel_writer=writer,
+                sheet_name='Статистика',
+                index=False,
+                startrow=len(total) + 2,
+            )
+
+        # Set column widths
+        writer.sheets['Статистика'].set_column('A:A', 56)
+        writer.sheets['Статистика'].set_column('B:B', 24)
+        writer.sheets['Статистика'].set_column('C:C', 24)
+
+        # Create a pie chart
+        workbook = writer.book
+        worksheet = writer.sheets['Статистика']
+        
+        # Create chart object
+        chart = workbook.add_chart({'type': 'pie'})
+        
+        # Get the data range for the chart
+        data_start_row = len(total) + 3  # +2 for startrow, +1 for header
+        data_end_row = data_start_row + len(result) - 1
+        
+        # Наполняем круговую диаграмму
+        chart.add_series({
+            'categories': ['Статистика', data_start_row, 0, data_end_row, 0],
+            'values': ['Статистика', data_start_row, 1, data_end_row, 1],
+            'data_labels': {'percentage': True, 'category': True},
+        })
+
+        # Вставляем диаграмму в Excel
+        worksheet.insert_chart(
+            0,
+            3, 
+            chart,
+            {
+                'x_scale': 1.5,     # Масштаб по ширине (1.5x default)
+                'y_scale': 2      # масштаб по высоте (1.5x default)
+            })
+
+
+
 
     def draw_report(self) -> SuccesSchema:
         """
@@ -280,7 +328,7 @@ class MergeDrawer(Drawer):
 
         # Переименовываем и переставляем колонки
         col_map = self.config['report_column_map']
-        self.result_df = self._reformat_dataframe(
+        self.result_df = DataFrameUtils.reformat_dataframe(
             df=self.result_df,
             column_map=col_map,
         )
@@ -302,5 +350,120 @@ class MergeDrawer(Drawer):
             download_link=link_file,
         )
 
-    
 
+class FormatDrawer(Drawer):
+    """
+    Класс для форматирования Excel-отчетов.
+
+    Наследуется от базового класса `Drawer`. Использует конфигурацию из файла или переданную вручную,
+    переформатирует данные, применяет стиль оформления к Excel-файлу и возвращает ссылку на скачивание.
+    """
+
+    def __init__(
+        self,
+        format_df: pd.DataFrame,
+        config: dict | None = None,
+        config_path: str = r'app/report_config.json',
+    ):
+        """
+        Инициализация экземпляра класса.
+
+        :param format_df: Исходный DataFrame с данными для форматирования.
+        :type format_df: pd.DataFrame
+        :param config: Необязательный параметр — пользовательская конфигурация. Если не задан,
+                       загружается из указанного файла.
+        :type config: dict | None
+        :param config_path: Путь к файлу конфигурации (по умолчанию 'app/report_config.json').
+        :type config_path: str
+        """
+        self.format_df = format_df
+
+        if config is not None:
+            self.config = config
+        else:
+            with open(config_path, 'r', encoding='utf-8') as file:
+                self.config = json.load(file)
+
+    def _format_excel_report(self, output_file: str, sheet_name: str):
+        """
+        Внутренний метод для форматирования Excel-файла.
+
+        Применяет стили к колонкам и строкам, задает ширину столбцов и центрирование текста.
+
+        :param output_file: Путь к файлу, в который будет сохранён Excel-отчёт.
+        :type output_file: str
+        :param sheet_name: Название листа Excel.
+        :type sheet_name: str
+        """
+        with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
+
+            result_df = self.result_df.ffill()
+
+            result_df.to_excel(
+                excel_writer=writer,
+                sheet_name=sheet_name,
+                index=False,
+            )
+
+            worksheet = writer.sheets[sheet_name]
+            worksheet.set_column('A:A', 16)
+            worksheet.set_column('B:B', 20)
+            worksheet.set_column('C:C', 16)
+            worksheet.set_column('D:D', 16)
+            worksheet.set_column('E:E', 24)
+            worksheet.set_column('F:F', 56)
+            worksheet.set_column('G:G', 20)
+            worksheet.set_column('H:H', 104)
+            worksheet.set_column('I:I', 24)
+            worksheet.set_column('J:J', 24)
+
+            # Задаем форматирование для всех строк
+            cell_format = writer.book.add_format({
+                'text_wrap': True,
+                'valign': 'vcenter',
+                'border': 1,
+                'align': 'center',
+            })
+
+            # Применяем форматирование ко всем строкам
+            for i in range(1, self.format_df.shape[0]):
+                worksheet.set_row(
+                    i,
+                    None,
+                    cell_format,
+                )
+
+    def draw_report(self):
+        """
+        Основной метод для генерации и сохранения отчета.
+
+        Выполняет следующие шаги:
+        1. Переформатирует исходные данные согласно `config['format_column_map']`.
+        2. Сохраняет результат в файл.
+        3. Применяет форматирование к Excel.
+        4. Возвращает объект `SuccesSchema` с сообщением об успехе и ссылкой на скачивание.
+
+        :return: Объект `SuccesSchema`, содержащий сообщение и ссылку на скачивание.
+        :rtype: SuccesSchema
+        """
+        self.result_df = DataFrameUtils.reformat_dataframe(
+            df=self.format_df,
+            column_map=self.config['format_column_map'],
+        )
+
+        # Сохраняем отчет
+        upload_folder = os.environ.get('UPLOAD_FOLDER')
+        output_file, link_file = Utils.create_save_file(
+            upl_folder=upload_folder,
+        )
+
+        # Форматируем Excel
+        self._format_excel_report(
+            output_file=output_file,
+            sheet_name='Отчет'
+        )
+
+        return SuccesSchema(
+            message='Отчет создан',
+            download_link=link_file,
+        )

@@ -2,7 +2,7 @@ import os
 from .schemas import SuccesSchema
 from .utils import Utils, ExcelUtils
 import json
-from .drawer import MergeDrawer
+from .drawer import MergeDrawer, FormatDrawer
 
 
 class MergeController:
@@ -59,8 +59,38 @@ class MergeController:
         )
         return drawer.draw_report()
 
-        
-    
 class FormatController():
-    pass
+    
+    @staticmethod
+    def format(format_file ) -> SuccesSchema:
+        print('начинаем форматирование')
+
+        # Сохранение файлов
+        upload_folder = os.environ.get('UPLOAD_FOLDER')
+        format_path = Utils.save_uploaded_files(
+            files=[format_file],
+            upload_folder=upload_folder
+        )
+        print('путь к файлу ', format_path)
+
+        # Проверяем правильность данных
+        with open(r'app/report_config.json', encoding='utf-8') as f:
+            config = json.load(f)
+            format_columns = config["format_columns"]
+
+        print('Открыли конфиг')
+
+        format_df = ExcelUtils.check_excel_structure(
+            file_path=format_path,
+            columns=format_columns
+        )
+        print('Проверили структуру')
+
+        # Создаем отчет
+        drawer = FormatDrawer(
+            format_df=format_df,
+            config_path=r'app/report_config.json',
+        )
+        print('Создал drawer')
+        return drawer.draw_report()
 

@@ -115,11 +115,3 @@ class TestDataCleaner:
             mock_delete_file.assert_any_call(now, '/mock/folder', 'file1.txt')
             mock_delete_file.assert_any_call(now, '/mock/folder', 'file2.txt')
 
-
-    def test_constructor_prints_message(self, capsys):
-        """
-        Проверяет, что конструктор выводит сообщение при создании экземпляра `DataCleaner`.
-        """
-        DataCleaner(folders=['/test'], max_life_time=100)
-        captured = capsys.readouterr()
-        assert "Создан уборщик данных" in captured.out

@@ -64,10 +64,18 @@ def configure_routes(app):
         :return: Ответ в формате JSON с данными результата или ошибкой.
         """
         try:
+            print('пришел запрос на format')
             # - валидация -
-            data = FormatSchema(**request.get_json())
-            data.validate_excel_extension()
+            file = request.files['format_file']
+            data = FormatSchema(
+                format_file=file.filename
+            )
+            # - Передача данных в контроллер -
+            response = FormatController.format(
+                format_file=file,
+            )
 
+            return jsonify(response.model_dump())
         except Exception as e:
             error = ErrorSchema(
                 message=str(e),

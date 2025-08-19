@@ -1,6 +1,6 @@
 import uuid
 import os
-from typing import Tuple, List
+from typing import Tuple, List, Dict, Any
 import pandas as pd
 
 class Utils:
@@ -32,6 +32,8 @@ class Utils:
             path = os.path.join(upload_folder, unique_name)
             file.save(path)
             file_paths.append(path)
+        if len(file_paths) == 1:
+            return file_paths[0]
         return tuple(file_paths)
 
     @staticmethod
@@ -85,5 +87,54 @@ class ExcelUtils:
             return df
         except Exception as e:
             raise ValueError(f"Ошибка при чтении файла: {str(e)}")
+    
+    @staticmethod
+    def get_cell_color(value: str) -> str:
+        """
+        Генерирует HEX-цвет на основе хеша строки.
 
-        
+        :param value: Входная строка.
+        :return: HEX-код цвета.
+        """
+        hash_integer = abs(hash(str(value)))
+
+        r = 150 + (hash_integer % 101) & 0xFF
+        g = 150 + ((hash_integer // 100) % 101)
+        b = 150 + ((hash_integer // 10000) % 101)
+
+        r = min(r, 255)
+        g = min(g, 255)
+        b = min(b, 255)
+
+        hex_color = f"#{r:02x}{g:02x}{b:02x}"
+        return hex_color
+
+
+class DataFrameUtils:
+
+    @staticmethod
+    def reformat_dataframe(df: pd.DataFrame, column_map: Dict[str, List[Any]]) -> pd.DataFrame:
+        """
+        Переформатирует DataFrame согласно заданному отображению колонок.
+
+        :param df: Исходный DataFrame.
+        :param column_map: Словарь с новыми названиями и порядком колонок.
+        :return: Отформатированный DataFrame.
+        """
+        # Создаем словарь для переименования и отбора колонок
+        rename_dict = {}
+        columns_to_keep = []
+
+        for new_name, (index, old_name) in column_map.items():
+            if old_name in df.columns:
+                rename_dict[old_name] = new_name
+                columns_to_keep.append(old_name)
+
+        # Отбираем только нужные колонки и переименовываем их
+        df_filtered = df[columns_to_keep].rename(columns=rename_dict)
+
+        # Сортируем колонки согласно индексам из column_map
+        new_columns_order = [k for k, _ in sorted(column_map.items(), key=lambda x: x[1][0])]
+
+        # Возвращаем DataFrame только с нужными колонками в правильном порядке
+        return df_filtered[new_columns_order]

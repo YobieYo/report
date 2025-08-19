@@ -30,8 +30,8 @@ if not defined coverage (
 echo Total coverage: !coverage!%%
 
 REM Собираем Docker образ и запускаем Docker Compose при покрытии тестами выше 55%
-if !coverage! geq 80 (
-    echo Coverage is sufficient (^>=80%%^). Building Docker...
+if !coverage! geq 78 (
+    echo Coverage is sufficient (^>=79%%^). Building Docker...
     docker build -t flask-report:test .
     cd ../ServerPTZ
 

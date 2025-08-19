@@ -65,22 +65,29 @@
     <!-- Modal -->
     <div class="modal" id="modal">
         <div class="modal-content">
-            <h3 class="modal-title">Объединение отчетов</h3>
-            <p class="modal-text">Отчеты успешно объединены. Хотите скачать результат?</p>
+            <h3 class="modal-title">Форматирование отчетов</h3>
+            <p class="modal-text" id="modal_text">Отчеты успешно объединены. Хотите скачать результат?</p>
             <div class="modal-actions">
                 <button class="modal-button cancel">Отмена</button>
-                <button class="modal-button confirm">Скачать</button>
+                <a class="modal-button confirm inactive" href="#" id="download-btn">Скачать</a>
             </div>
         </div>
     </div>
 
-    <script>
+    <script type="module">
+        import {ApiService} from "{{ url_for('static', filename='scripts.js') }}";
+
         document.addEventListener('DOMContentLoaded', function() {
             const formatFileInput = document.getElementById('format-file');
             const mergeButton = document.getElementById('merge-button');
+
             const modal = document.getElementById('modal');
+            const modalText = document.getElementById('modal_text');
+
             const loadingBar = document.getElementById('loading-bar');
             const loadingProgress = document.getElementById('loading-progress');
+
+            const downloadBtn = document.getElementById('download-btn');
             
             // File input handlers           
             formatFileInput.addEventListener('change', function() {
@@ -105,25 +112,24 @@
             
             // Merge button handler
             mergeButton.addEventListener('click', function() {
+                // Show loading animation
+                loadingBar.style.display = 'block';
 
                 const formData = new FormData();
                 formData.append('format_file', formatFileInput.files[0]);
 
-                // Show loading animation
-                loadingBar.style.display = 'block';
-                scrollTo(0, document.body.scrollHeight);
-                let progress = 0;
-                const interval = setInterval(() => {
-                    progress += 5;
-                    loadingProgress.style.width = `${progress}%`;
-                    
-                    if (progress >= 100) {
-                        clearInterval(interval);
-                        loadingBar.style.display = 'none';
-                        loadingProgress.style.width = '0';
-                        modal.classList.add('active');
-                    }
-                }, 100);
+                // Выводим модальное окно
+                modal.classList.add('active');
+                modalText.textContent = 'Форматирование отчета...';
+
+                ApiService.sendMergeRequest(formData, "{{ url_for('send_format_file') }}")
+                    .then(response => {
+                        modalText.textContent = response.message;
+                        if (response.download_link) {
+                            downloadBtn.href = `{{ url_for('download_file') }}?link=${response.download_link}`;
+                            downloadBtn.classList.remove('inactive');
+                        }
+                    })
             });
             
             // Modal handlers
@@ -131,10 +137,8 @@
                 modal.classList.remove('active');
             });
             
-            document.querySelector('.modal-button.confirm').addEventListener('click', function() {
-                modal.classList.remove('active');
-                // Here you would typically trigger the file download
-                alert('Файл успешно скачан!');
+            downloadBtn.addEventListener('click', function(event) {
+                downloadBtn.classList.add('inactive');
             });
         });
     </script>
