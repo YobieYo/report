@@ -72,14 +72,59 @@ class MergeDrawer(Drawer):
 
         :return: Объединённый DataFrame.
         """
+        # Загружаемнужные колнки из битркса
         bitrix_cols = self.config['bitrix_columns']
         self.bitrix_df = self.bitrix_df.loc[:, bitrix_cols]
 
+        # Длинные программы не вмещаются в названия задач на битркс
+        # Их названия записывают в описание задачи
+        # Описания начинающиеся с "ПЭ: " ставим в названия
+        self.bitrix_df[['Название', 'Описание']] = self.bitrix_df.apply(
+            lambda row: (row['Описание'], row['Название']) 
+            if str(row['Описание']).startswith('ПЭ: ') 
+            else (row['Название'], row['Описание']),
+            axis=1,
+            result_type='expand'
+        )
+        """self.bitrix_df = (
+            self.bitrix_df
+            .assign(Описание=self.bitrix_df['Описание'].str.split('; '))
+            .explode('Описание')
+        )
+
+        self.bitrix_df = (
+            self.bitrix_df
+            .assign(Название=self.bitrix_df['Название'].str.split('; '))
+            .explode('Название')
+        )"""
+
+        # Нормализация
+        self.bitrix_df['Название'] = self.bitrix_df['Название'].apply(
+            lambda x: x[4:] if str(x).startswith('ПЭ: ') else x
+        )
+        
+        # Разделяем задачи по бюро
+        self.bitrix_df = (
+            self.bitrix_df
+            .assign(Теги=self.bitrix_df['Теги'].str.split(', '))
+            .explode('Теги')
+        )
+
+        
+
         web_cols = self.config['web_columns']
         self.web_df = self.web_df.loc[:, web_cols]
-
-        # нормализация
-        self.bitrix_df['Название'] = self.bitrix_df['Название'].str[4:]
+        self.web_df["ПЭ: Комментарий"] = self.web_df["ПЭ: Комментарий"].fillna(
+            value='-'
+        )
+        
+        self.web_df = (
+            self.web_df
+            .assign(**{'Опытный узел': self.web_df['Опытный узел'].str.split('; ')})
+            .explode('Опытный узел')
+        )
+        
+        
         self.web_df[['№ трактора', 'Опытный узел']] = self.web_df[['№ трактора', 'Опытный узел']].ffill()
 
         # Объединяем битрикс и веб по полям 'Название' и 'Опытный узел'
@@ -88,175 +133,227 @@ class MergeDrawer(Drawer):
             self.web_df,
             left_on='Название',
             right_on='Опытный узел',
-            how='right',
+            #how='right',
+            how='left',
             suffixes=('_bitrix', '')  # правый без суффикса
         )
+        
 
-        result_df = result_df.ffill().bfill()
-
-        # если из bitrix тоже пришло «Бюро», удалим его
-        if 'Бюро_bitrix' in result_df.columns and 'Бюро' in result_df.columns:
-            result_df = result_df.drop(columns=['Бюро_bitrix'])
+        result_df = result_df.ffill().bfill() 
 
         return result_df
 
     def _format_excel_report(self, group_col_name: str, output_file: str) -> None:
-        """
-        Форматирует и сохраняет данные в Excel-файл с несколькими листами.
+            """
+            Форматирует и сохраняет данные в Excel-файл с несколькими листами.
 
-        :param group_col_name: Название столбца для группировки (например, 'Бюро').
-        :param output_file: Путь к выходному Excel-файлу.
-        """
-        grouped = self.result_df.groupby(group_col_name)
+            :param group_col_name: Название столбца для группировки (например, 'Бюро').
+            :param output_file: Путь к выходному Excel-файлу.
+            """
+            grouped = self.result_df.groupby(group_col_name)
 
-        with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
+            with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
 
-            # Создаем лист статистики
-            self._create_stats_sheet(writer)
+                # Создаем лист статистики
+                self._create_stats_sheet(writer)
 
-            # Создаем листы по бюро
-            for name, group in grouped:
-                sheet_name = str(name).replace(':', '').replace('\\', '').replace('/', '')[:31]
-                format_dict = {}
+                # Создаем листы по бюро
+                for name, group in grouped:
+                    sheet_name = str(name).replace(':', '').replace('\\', '').replace('/', '')[:31]
+                    format_dict = {}
 
-                # расчитываем статистику в шапке
-                name_counts = (
-                    group.groupby('Опытный узел')['№ трактора']
-                    .nunique()
-                    .reset_index()
-                    .rename(columns={'№ трактора': 'Количество тракторов'})
-                )
-
-                # Шапка страницы
-                header_df = pd.DataFrame({
-                    'Опытный узел': name_counts['Опытный узел'],
-                    'Пусто1': '',
-                    'Пусто2': '',
-                    'Пусто3': '',
-                    'Пусто4': '',
-                    'Количество тракторов': name_counts['Количество тракторов']
-                })
-
-                # Записываем шапку в Excel
-                header_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=0)
-                worksheet = writer.sheets[sheet_name]
-
-                # Форматируем шапку
-                for row_offset, value in enumerate(header_df['Опытный узел'], start=1):
-                    color = ExcelUtils.get_cell_color(value)
-                    if color not in format_dict:
-                        format_dict[color] = writer.book.add_format({
-                            'bg_color': color, 
-                            'valign': 'vcenter',
-                            'border': 1,
-                            })
-                    worksheet.merge_range(
-                        first_row=0 + row_offset,
-                        first_col=0,
-                        last_row=0 + row_offset,
-                        last_col=4,
-                        data=value,
-                        cell_format=format_dict[color],
+                    # рассчитываем статистику в шапке
+                    name_counts = (
+                        group.groupby('Опытный узел')['№ трактора']
+                        .nunique()
+                        .reset_index()
+                        .rename(columns={'№ трактора': 'Количество тракторов'})
                     )
 
-                # Создаем формат заголовков
-                header_format = writer.book.add_format({
-                    'bold': True,
-                    'align': 'center',
-                    'valign': 'vcenter',
-                    'border': 1,
-                    'text_wrap': True,
-                })
-
-                # Создаем заголовок шапки страницы
-                worksheet.merge_range(0, 0, 0, 4, 'Программа ПЭ:', header_format)
-                worksheet.write(0, 5, 'Количество тракторов', header_format)
-
-                # Задаем размеры колонкам
-                start_row = len(name_counts) + 4
-                worksheet.set_column('A:A', 16)
-                worksheet.set_column('B:B', 20)
-                worksheet.set_column('C:C', 56)
-                worksheet.set_column('D:D', 18)
-                worksheet.set_column('E:E', 24)
-                worksheet.set_column('F:F', 12)
-                worksheet.set_column('G:G', 20)
-                worksheet.set_column('H:H', 104)
-                worksheet.set_column('I:I', 18)
-
-                # Убираем колонку бюро из таблицы
-                group = group.drop(columns=['Бюро'])
-                
-                # Заполняем заголовок главной таблицы
-                for i, col in enumerate(group.columns):
-                    worksheet.write(
-                        start_row-1,
-                        i,
-                        col,
-                        header_format,
-                    )
-                
-                # Записываем главную таблицу
-                group.to_excel(
-                    writer,
-                    sheet_name=sheet_name,
-                    index=False,
-                    startrow=start_row,
-                    header=False,
+                    # Рассчитываем среднюю наработку для каждого опытного узла
+                    avg_hours = (
+                        group.groupby('Опытный узел')
+                        .apply(lambda x: x.groupby('№ трактора')['Наработка, м/ч'].max().mean())
+                        .reset_index(name='Средняя наработка, м/ч')
+                        .round(1)
                     )
 
-                # Задаем какую колонку раскрашиваем
-                colored_col = self.config["report_column_map"]["Опытный узел"][0]
-
-
-                # Раскрашиваем ячейки
-                for row_offset, value in enumerate(group['Опытный узел'], 0):
-                    color = ExcelUtils.get_cell_color(value)
-                    if color not in format_dict:
-                        format_dict[color] = writer.book.add_format({
-                            'bg_color': color,
-                            'valign': 'vcenter',
-                            'border': 1,
-                            'text_wrap': True
-                            })
-                    worksheet.write(start_row + row_offset, colored_col, value, format_dict[color])
-
-                # Задаем форматирование для всех строк
-                cell_format = writer.book.add_format({
-                    'text_wrap': True,
-                    'valign': 'vcenter',
-                    'border': 1,
-                })
-
-                # Применяем форматирование ко всем строкам
-                print(f'Начальная строка форматирвоание{start_row}')
-                print(f'всего строк для форматирвания {group.shape[0]}')
-                for i in range(start_row, group.shape[0]):
-                    worksheet.set_row(
-                        i,
-                        None,
-                        cell_format,
+                    # Рассчитываем максимальную наработку для каждого опытного узла
+                    max_hours = (
+                        group.groupby('Опытный узел')['Продолжительность контроля, м/ч']
+                        .agg(lambda x: x.unique()[0])  # берем единственное уникальное значение
+                        .str.extract('(\d+)')[0]      # извлекаем число из строки (например, '2000 м/ч' → 2000)
+                        .astype(float)                # преобразуем в число
+                        .reset_index(name='Продолжительность контроля, м/ч')
                     )
 
+                    # Объединяем данные
+                    stats_df = pd.merge(name_counts, avg_hours, on='Опытный узел')
+                    stats_df = pd.merge(stats_df, max_hours, on='Опытный узел')
+
+                    # Вычисляем отношение средней к максимальной наработке
+                    stats_df['Отношение avr/max'] = (stats_df['Средняя наработка, м/ч'] / stats_df['Продолжительность контроля, м/ч']).round(2) * 100
+
+                    # Шапка страницы
+                    header_df = pd.DataFrame({
+                        'Опытный узел': stats_df['Опытный узел'],
+                        'Пусто1': '',
+                        'Пусто2': '',
+                        'Пусто3': '',
+                        'Пусто4': '',
+                        'Количество тракторов': stats_df['Количество тракторов'],
+                        'Средняя наработка, м/ч': stats_df['Средняя наработка, м/ч'],
+                        'Отношение avr/max': stats_df['Отношение avr/max']
+                    })
+
+                    # Записываем шапку в Excel
+                    header_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=0)
+                    worksheet = writer.sheets[sheet_name]
+
+                    # Форматируем шапку
+                    for row_offset, value in enumerate(header_df['Опытный узел'], start=1):
+                        color = ExcelUtils.get_cell_color(value)
+                        if color not in format_dict:
+                            format_dict[color] = writer.book.add_format({
+                                'bg_color': color, 
+                                'valign': 'vcenter',
+                                'border': 1,
+                                })
+                        worksheet.merge_range(
+                            first_row=0 + row_offset,
+                            first_col=0,
+                            last_row=0 + row_offset,
+                            last_col=4,
+                            data=value,
+                            cell_format=format_dict[color],
+                        )
+
+                    # Создаем формат заголовков
+                    header_format = writer.book.add_format({
+                        'bold': True,
+                        'align': 'center',
+                        'valign': 'vcenter',
+                        'border': 1,
+                        'text_wrap': True,
+                    })
+
+                    # Создаем заголовок шапки страницы
+                    worksheet.merge_range(0, 0, 0, 4, 'Программа ПЭ:', header_format)
+                    worksheet.write(0, 5, 'Количество тракторов', header_format)
+                    worksheet.write(0, 6, 'Средняя наработка, м/ч', header_format)
+                    worksheet.write(0, 7, 'Прогресс программы, %', header_format)
+
+                    # Процентный формат (85% вместо 0.85)
+                    percent_format = writer.book.add_format({"num_format": "0%"})
+                    worksheet.set_column("H:H", None, percent_format)
+
+                    num_of_programs = group.groupby('Опытный узел').size().shape[0]
+
+                    # Добавляем прогресс-бары (data bars)
+                    worksheet.conditional_format(
+                        f"H2:H{num_of_programs+1}",  # Диапазон 
+                        {
+                            "type": "data_bar",
+                            "bar_color": "#63C384",  # Зеленый
+                            "bar_solid": True,       # Сплошная заливка (не градиент)
+                            "min_type": "num",
+                            "min_value": 0,          # Минимум для шкалы (0%)
+                            "max_type": "num",
+                            "max_value": 100,          # Максимум для шкалы (100%)
+                        },
+                    )
+
+
+
+                    # Задаем размеры колонкам
+                    start_row = len(name_counts) + 4
+                    worksheet.set_column('A:A', 16)
+                    worksheet.set_column('B:B', 20)
+                    worksheet.set_column('C:C', 56)
+                    worksheet.set_column('D:D', 18)
+                    worksheet.set_column('E:E', 24)
+                    worksheet.set_column('F:F', 12)
+                    worksheet.set_column('G:G', 20)
+                    worksheet.set_column('H:H', 104)
+                    worksheet.set_column('I:I', 18)
+
+                    # Убираем колонку бюро из таблицы
+                    group = group.drop(columns=['Бюро'])
+                    
+                    # Заполняем заголовок главной таблицы
+                    for i, col in enumerate(group.columns):
+                        worksheet.write(
+                            start_row-1,
+                            i,
+                            col,
+                            header_format,
+                        )
+                    
+                    # Записываем главную таблицу
+                    group.to_excel(
+                        writer,
+                        sheet_name=sheet_name,
+                        index=False,
+                        startrow=start_row,
+                        header=False,
+                        )
+
+                    # Задаем какую колонку раскрашиваем
+                    colored_col = self.config["report_column_map"]["Опытный узел"][0]
+
+
+                    # Раскрашиваем ячейки
+                    for row_offset, value in enumerate(group['Опытный узел'], 0):
+                        color = ExcelUtils.get_cell_color(value)
+                        if color not in format_dict:
+                            format_dict[color] = writer.book.add_format({
+                                'bg_color': color,
+                                'valign': 'vcenter',
+                                'border': 1,
+                                'text_wrap': True
+                                })
+                        worksheet.write(start_row + row_offset, colored_col, value, format_dict[color])
+
+                    # Задаем форматирование для всех строк
+                    cell_format = writer.book.add_format({
+                        'text_wrap': True,
+                        'valign': 'vcenter',
+                        'border': 1,
+                    })
+
+                    for i in range(start_row, group.shape[0]+start_row):
+                        worksheet.set_row(
+                            i,
+                            None,
+                            cell_format,
+                        )
     def _create_stats_sheet(self, writer):
-        # Create the total stats table
-        total = pd.DataFrame(self.result_df.agg(
+        # Общая статистика
+        total_tractors = pd.DataFrame(self.web_df.agg(
                 func={
-                    'Опытный узел': 'nunique',
                     '№ трактора': 'nunique'
                 },
             )).T.reset_index(drop=True)
-        total = total.rename(columns={
-                'Опытный узел': 'Число опытных узлов',
+        total_tractors = total_tractors.rename(columns={
                 '№ трактора': 'Число тракторов'
             })
+        
+        total_programs = pd.DataFrame(self.bitrix_df.agg(
+            func={
+                'Название': 'nunique',
+            }
+        )).T.reset_index(drop=True)
+
+        total = pd.concat([total_tractors, total_programs], axis=1)
+        
+        # Записываем общую статистику в Excel
         total.to_excel(
                 excel_writer=writer,
                 sheet_name='Статистика',
                 index=False
             )
 
-        # Create the bureau stats table
+        # Статистика по бюро
         result = self.result_df.groupby('Бюро').agg({
                 'Опытный узел': 'nunique',
                 '№ трактора': 'nunique'
