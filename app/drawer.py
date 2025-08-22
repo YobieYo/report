@@ -156,6 +156,7 @@ class MergeDrawer(Drawer):
 
                 # Создаем лист статистики
                 self._create_stats_sheet(writer)
+                self._create_conflict_sheet(writer)
 
                 # Создаем листы по бюро
                 for name, group in grouped:
@@ -405,6 +406,29 @@ class MergeDrawer(Drawer):
             })
 
 
+    def _create_conflict_sheet(self, writer):
+        merged = pd.merge(
+            self.result_df, 
+            self.bitrix_df,
+            left_on='Опытный узел', 
+            right_on='Название',
+            how='outer',
+            indicator=True
+        )
+
+        # Фильтруем только уникальные значения (только в одной таблице)
+        df3 = merged[merged['_merge'] != 'both'].drop('_merge', axis=1).dropna(axis=1)
+        
+        df3.to_excel(
+            excel_writer=writer,
+            sheet_name='Конфликты',
+            index=False,
+        )
+
+        sheet = writer.sheets['Конфликты']
+        sheet.set_column('A:A', 54)
+        sheet.set_column('B:B', 12)
+        sheet.set_column('C:C', 54)
 
 
     def draw_report(self) -> SuccesSchema:
