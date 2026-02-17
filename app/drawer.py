@@ -72,7 +72,7 @@ class MergeDrawer(Drawer):
 
         :return: Объединённый DataFrame.
         """
-        # Загружаемнужные колнки из битркса
+        # Загружаемнужные колонки из битркса
         bitrix_cols = self.config['bitrix_columns']
         self.bitrix_df = self.bitrix_df.loc[:, bitrix_cols]
 
@@ -110,7 +110,19 @@ class MergeDrawer(Drawer):
             .explode('Теги')
         )
 
-        
+         #Разбиваем составные названия программ по "; " (как в веб-системе)
+        self.bitrix_df['Название'] = self.bitrix_df['Название'].fillna('')  # Защита от NaN
+        self.bitrix_df = (
+            self.bitrix_df
+            .assign(Название=self.bitrix_df['Название'].str.split(r'\s*;\s*'))  # Устойчиво к пробелам
+            .explode('Название')
+        )
+        # Удаляем пустые и "только пробелы" после разбивки
+        self.bitrix_df = self.bitrix_df[
+            self.bitrix_df['Название'].notna() & 
+            (self.bitrix_df['Название'].str.strip() != '')
+        ].copy()
+        self.bitrix_df['Название'] = self.bitrix_df['Название'].str.strip()
 
         web_cols = self.config['web_columns']
         self.web_df = self.web_df.loc[:, web_cols]
