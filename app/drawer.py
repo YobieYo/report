@@ -102,6 +102,7 @@ class MergeDrawer(Drawer):
         self.bitrix_df['Название'] = self.bitrix_df['Название'].apply(
             lambda x: x[4:] if str(x).startswith('ПЭ: ') else x
         )
+      
         
         # Разделяем задачи по бюро
         self.bitrix_df = (
@@ -150,7 +151,7 @@ class MergeDrawer(Drawer):
             suffixes=('_bitrix', '')  # правый без суффикса
         )
         
-
+        """ffill().bfill() — заполняет пропуски значениями из соседних строк, что приводит к "перетеканию" бюро из следующих задач"""
         result_df = result_df.ffill().bfill() 
 
         return result_df
