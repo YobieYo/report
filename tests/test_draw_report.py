@@ -3,6 +3,7 @@ import json
 import pandas as pd
 from pathlib import Path
 from app.drawer import MergeDrawer, Utils
+from unittest.mock import patch
 
 class DummySchema:
     def __init__(self, message, download_link):
@@ -26,20 +27,34 @@ def test_draw_report_integration(tmp_path, monkeypatch):
 
     # Мокаем конфиг, чтобы не читать файл
     config = {
-        'bitrix_columns': ['Название', 'Бюро'],
-        'web_columns': ['Опытный узел', '№ трактора', 'Бюро'],
+        'bitrix_columns': ['Название', 'Описание', 'Примечание', 'Теги'],
+        'web_columns': ['Опытный узел', '№ трактора', 'ПЭ: Комментарий'],
         'report_column_map': {
             'Опытный узел': (0, 'Опытный узел'),
             '№ трактора': (1, '№ трактора'),
-            'Бюро': (2, 'Бюро'),
+            'Бюро': (2, 'Теги'),
         }
     }
 
-    bitrix_df = pd.DataFrame({'Название': ['XXXXU1'], 'Бюро': ['A']})
-    web_df = pd.DataFrame({'Опытный узел': ['U1'], '№ трактора': [123], 'Бюро': ['A']})
+    bitrix_df = pd.DataFrame({
+        'Название': ['U1'],
+        'Описание': ['Описание U1'],
+        'Примечание': ['100 м/ч'],
+        'Теги': ['A'],
+    })
+    web_df = pd.DataFrame({
+        'Опытный узел': ['U1'],
+        '№ трактора': [123],
+        'ПЭ: Комментарий': ['-'],
+    })
 
     md = MergeDrawer(web_df=web_df, bitrix_df=bitrix_df, config=config)
-    res = md.draw_report()
+    with patch.object(MergeDrawer, '_format_excel_report', autospec=True) as format_report:
+        def fake_format_report(self, group_col_name, output_file):
+            Path(output_file).touch()
+
+        format_report.side_effect = fake_format_report
+        res = md.draw_report()
 
     assert isinstance(res, DummySchema)
     assert res.message == 'Отчет создан'

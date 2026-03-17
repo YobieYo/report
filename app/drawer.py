@@ -150,9 +150,6 @@ class MergeDrawer(Drawer):
             how='left',
             suffixes=('_bitrix', '')  # правый без суффикса
         )
-        
-        """ffill().bfill() — заполняет пропуски значениями из соседних строк, что приводит к "перетеканию" бюро из следующих задач"""
-        result_df = result_df.ffill().bfill() 
 
         return result_df
 
@@ -173,6 +170,15 @@ class MergeDrawer(Drawer):
 
                 # Создаем листы по бюро
                 for name, group in grouped:
+                    group = group.copy()
+                    task_mask = (
+                        group['Опытный узел'].notna()
+                        & group['Опытный узел'].astype(str).str.strip().ne('')
+                    )
+                    group = group[task_mask]
+                    if group.empty:
+                        continue
+
                     sheet_name = str(name).replace(':', '').replace('\\', '').replace('/', '')[:31]
                     format_dict = {}
 
@@ -186,8 +192,10 @@ class MergeDrawer(Drawer):
 
                     # Рассчитываем среднюю наработку для каждого опытного узла
                     avg_hours = (
-                        group.groupby('Опытный узел')
-                        .apply(lambda x: x.groupby('№ трактора')['Наработка, м/ч'].max().mean())
+                        group.groupby(['Опытный узел', '№ трактора'])['Наработка, м/ч']
+                        .max()
+                        .groupby(level=0)
+                        .mean()
                         .reset_index(name='Средняя наработка, м/ч')
                         .round(1)
                     )
@@ -195,10 +203,15 @@ class MergeDrawer(Drawer):
                     # Рассчитываем максимальную наработку для каждого опытного узла
                     max_hours = (
                         group.groupby('Опытный узел')['Продолжительность контроля, м/ч']
-                        .agg(lambda x: x.unique()[0])  # берем единственное уникальное значение
-                        .str.extract('(\d+)')[0]      # извлекаем число из строки (например, '2000 м/ч' → 2000)
-                        .astype(float)                # преобразуем в число
-                        .reset_index(name='Продолжительность контроля, м/ч')
+                        .apply(lambda x: x.dropna().iloc[0] if not x.dropna().empty else None)
+                        .rename('Продолжительность контроля, м/ч')
+                        .reset_index()
+                    )
+                    max_hours['Продолжительность контроля, м/ч'] = (
+                        max_hours['Продолжительность контроля, м/ч']
+                        .astype(str)
+                        .str.extract(r'(\d+)')[0]
+                        .astype(float)
                     )
 
                     # Объединяем данные
@@ -261,7 +274,7 @@ class MergeDrawer(Drawer):
                     percent_format = writer.book.add_format({"num_format": "0%"})
                     worksheet.set_column("H:H", None, percent_format)
 
-                    num_of_programs = group.groupby('Опытный узел').size().shape[0]
+                    num_of_programs = len(name_counts)
 
                     # Добавляем прогресс-бары (data bars)
                     worksheet.conditional_format(
@@ -319,6 +332,7 @@ class MergeDrawer(Drawer):
                     # Раскрашиваем ячейки
                     for row_offset, value in enumerate(group['Опытный узел'], 0):
                         color = ExcelUtils.get_cell_color(value)
+                        cell_value = '' if pd.isna(value) else value
                         if color not in format_dict:
                             format_dict[color] = writer.book.add_format({
                                 'bg_color': color,
@@ -326,7 +340,7 @@ class MergeDrawer(Drawer):
                                 'border': 1,
                                 'text_wrap': True
                                 })
-                        worksheet.write(start_row + row_offset, colored_col, value, format_dict[color])
+                        worksheet.write(start_row + row_offset, colored_col, cell_value, format_dict[color])
 
                     # Задаем форматирование для всех строк
                     cell_format = writer.book.add_format({
@@ -420,28 +434,73 @@ class MergeDrawer(Drawer):
 
 
     def _create_conflict_sheet(self, writer):
-        merged = pd.merge(
-            self.result_df, 
-            self.bitrix_df,
-            left_on='Опытный узел', 
-            right_on='Название',
-            how='outer',
-            indicator=True
-        )
+        bitrix_names = self.bitrix_df['Название'].astype(str).str.strip()
+        web_nodes = self.web_df['Опытный узел'].astype(str).str.strip()
 
-        # Фильтруем только уникальные значения (только в одной таблице)
-        df3 = merged[merged['_merge'] != 'both'].drop('_merge', axis=1).dropna(axis=1)
-        
-        df3.to_excel(
+        bitrix_valid_mask = bitrix_names.ne('') & bitrix_names.ne('nan')
+        web_valid_mask = web_nodes.ne('') & web_nodes.ne('nan')
+
+        bitrix_key_set = set(bitrix_names[bitrix_valid_mask].unique())
+        web_key_set = set(web_nodes[web_valid_mask].unique())
+
+        only_bitrix = self.bitrix_df[
+            bitrix_valid_mask & ~bitrix_names.isin(web_key_set)
+        ].copy()
+        only_web = self.web_df[
+            web_valid_mask & ~web_nodes.isin(bitrix_key_set)
+        ].copy()
+
+        conflict_parts = []
+
+        if not only_bitrix.empty:
+            bitrix_cols = [
+                column_name
+                for column_name in ['Название', 'Теги', 'Примечание', 'Описание']
+                if column_name in only_bitrix.columns
+            ]
+            bitrix_conflicts = only_bitrix[bitrix_cols].copy()
+            bitrix_conflicts = bitrix_conflicts.rename(columns={
+                'Название': 'Задача',
+                'Теги': 'Бюро',
+                'Примечание': 'Продолжительность контроля, м/ч',
+            })
+            bitrix_conflicts.insert(0, 'Источник', 'БИТРИКС')
+            bitrix_conflicts.insert(1, 'Причина', 'Нет в служебном отчете')
+            conflict_parts.append(bitrix_conflicts)
+
+        if not only_web.empty:
+            web_cols = [
+                column_name
+                for column_name in ['Опытный узел', '№ трактора', 'Модель трактора', 'Наработка, м/ч', 'ПЭ: Комментарий']
+                if column_name in only_web.columns
+            ]
+            web_conflicts = only_web[web_cols].copy()
+            web_conflicts = web_conflicts.rename(columns={
+                'Опытный узел': 'Задача',
+            })
+            web_conflicts.insert(0, 'Источник', 'СЛУЖЕБНЫЙ')
+            web_conflicts.insert(1, 'Причина', 'Нет в отчете БИТРИКС')
+            conflict_parts.append(web_conflicts)
+
+        if conflict_parts:
+            conflicts_df = pd.concat(conflict_parts, ignore_index=True, sort=False)
+        else:
+            conflicts_df = pd.DataFrame({'Статус': ['Конфликтов не найдено']})
+
+        conflicts_df.to_excel(
             excel_writer=writer,
             sheet_name='Конфликты',
             index=False,
         )
 
         sheet = writer.sheets['Конфликты']
-        sheet.set_column('A:A', 54)
-        sheet.set_column('B:B', 12)
-        sheet.set_column('C:C', 54)
+        sheet.set_column('A:A', 16)
+        sheet.set_column('B:B', 28)
+        sheet.set_column('C:C', 60)
+        sheet.set_column('D:D', 24)
+        sheet.set_column('E:E', 18)
+        sheet.set_column('F:F', 20)
+        sheet.set_column('G:G', 60)
 
 
     def draw_report(self) -> SuccesSchema:

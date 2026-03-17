@@ -196,3 +196,26 @@ class TestExcelUtils:
         columns = ["Имя", "Город"]
         result = ExcelUtils.check_excel_structure(valid_file_path, columns)
         assert isinstance(result, pd.DataFrame)
+
+    def test_check_excel_structure_expands_merged_cells(self, tmpdir):
+        """
+        Проверяет, что объединенные ячейки разворачиваются до чтения в DataFrame.
+        """
+        from openpyxl import Workbook
+
+        file_path = tmpdir.join("merged.xlsx")
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.append(["Бюро", "Название"])
+        worksheet.append(["Бюро 1", "Задача 1"])
+        worksheet.append([None, "Задача 2"])
+        worksheet.merge_cells("A2:A3")
+        workbook.save(str(file_path))
+
+        result = ExcelUtils.check_excel_structure(
+            str(file_path),
+            ["Бюро", "Название"],
+        )
+
+        assert result.iloc[0]["Бюро"] == "Бюро 1"
+        assert result.iloc[1]["Бюро"] == "Бюро 1"

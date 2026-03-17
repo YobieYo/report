@@ -2,6 +2,7 @@ import uuid
 import os
 from typing import Tuple, List, Dict, Any
 import pandas as pd
+from openpyxl import load_workbook
 
 class Utils:
     """
@@ -61,6 +62,40 @@ class ExcelUtils:
     """
 
     @staticmethod
+    def _read_excel_with_merged_cells(file_path: str) -> pd.DataFrame:
+        """
+        Читает первый лист Excel и разворачивает объединенные ячейки.
+
+        Это позволяет сохранить визуальную структуру исходного файла:
+        значения из верхней левой ячейки merged range копируются во все
+        ячейки диапазона до преобразования в DataFrame.
+        """
+        workbook = load_workbook(filename=file_path, data_only=True)
+        worksheet = workbook.worksheets[0]
+        merged_values = {}
+
+        for merged_range in worksheet.merged_cells.ranges:
+            min_col, min_row, max_col, max_row = merged_range.bounds
+            top_left_value = worksheet.cell(row=min_row, column=min_col).value
+
+            for row_index in range(min_row, max_row + 1):
+                for column_index in range(min_col, max_col + 1):
+                    merged_values[(row_index, column_index)] = top_left_value
+
+        rows = []
+        for row in worksheet.iter_rows():
+            row_values = []
+            for cell in row:
+                row_values.append(merged_values.get((cell.row, cell.column), cell.value))
+            rows.append(tuple(row_values))
+
+        if not rows:
+            return pd.DataFrame()
+
+        header, *data_rows = rows
+        return pd.DataFrame(data_rows, columns=header)
+
+    @staticmethod
     def check_excel_structure(file_path: str, columns: List[str]):
         """
         Проверяет, содержит ли Excel-файл указанные колонки.
@@ -77,7 +112,7 @@ class ExcelUtils:
         :raises ValueError: Если файл содержит недостающие колонки или произошла ошибка чтения.
         """
         try:
-            df = pd.read_excel(file_path)
+            df = ExcelUtils._read_excel_with_merged_cells(file_path)
             actual_columns = set(col.strip().lower() for col in df.columns)
             required_set = set(col.strip().lower() for col in columns)
 
