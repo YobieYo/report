@@ -27,8 +27,8 @@ def test_draw_report_integration(tmp_path, monkeypatch):
 
     # Мокаем конфиг, чтобы не читать файл
     config = {
-        'bitrix_columns': ['Название', 'Описание', 'Примечание', 'Теги'],
-        'web_columns': ['Опытный узел', '№ трактора', 'ПЭ: Комментарий'],
+        'bitrix_columns': ['ID', 'Название', 'Описание', 'Примечание', 'Теги'],
+        'web_columns': ['Опытный узел', '№ трактора', 'ПЭ: Комментарий', '№ задачи в Битрикс'],
         'report_column_map': {
             'Опытный узел': (0, 'Опытный узел'),
             '№ трактора': (1, '№ трактора'),
@@ -37,6 +37,7 @@ def test_draw_report_integration(tmp_path, monkeypatch):
     }
 
     bitrix_df = pd.DataFrame({
+        'ID': [555],
         'Название': ['U1'],
         'Описание': ['Описание U1'],
         'Примечание': ['100 м/ч'],
@@ -46,6 +47,7 @@ def test_draw_report_integration(tmp_path, monkeypatch):
         'Опытный узел': ['U1'],
         '№ трактора': [123],
         'ПЭ: Комментарий': ['-'],
+        '№ задачи в Битрикс': [555],
     })
 
     md = MergeDrawer(web_df=web_df, bitrix_df=bitrix_df, config=config)

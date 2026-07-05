@@ -2,9 +2,70 @@ from abc import ABC, abstractmethod
 from .schemas import ErrorSchema, SuccesSchema
 import pandas as pd
 import json
+import re
 from .utils import Utils, DataFrameUtils, ExcelUtils
 import os
 from typing import Dict, List, Any
+
+
+def _normalize_task_number(value) -> str | None:
+    """
+    Приводит номер задачи к строке для сравнения (Excel часто хранит его как float).
+    """
+    if pd.isna(value):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    text = str(value).strip()
+    return text or None
+
+
+def _split_task_numbers(value) -> List[str]:
+    """
+    Достаёт все номера задач из ячейки, независимо от разделителя
+    (запятая, пробел, точка с запятой и т.п.).
+    """
+    if pd.isna(value):
+        return []
+    return re.findall(r'\d+', str(value))
+
+
+def _norm_text(value) -> str:
+    """Нормализует текст для сравнения названий/описаний узлов."""
+    if pd.isna(value):
+        return ''
+    return str(value).strip().casefold()
+
+
+def _explode_web_tasks(web_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Разносит строку служебного отчёта на несколько строк, если в ней указано
+    несколько опытных узлов (разделены "; ") и/или несколько номеров задач
+    в Битрикс. Узлы и номера сопоставляются по позиции.
+    """
+    records = []
+    for _, row in web_df.iterrows():
+        raw_node = row['Опытный узел']
+        nodes = str(raw_node).split('; ') if pd.notna(raw_node) else [None]
+        numbers = _split_task_numbers(row.get('№ задачи в Битрикс'))
+
+        count = len(nodes)
+        if len(numbers) < count:
+            numbers = numbers + [None] * (count - len(numbers))
+        elif len(numbers) > count:
+            numbers = numbers[:count]
+
+        for node, number in zip(nodes, numbers):
+            new_row = row.copy()
+            new_row['Опытный узел'] = node
+            new_row['№ задачи в Битрикс'] = number
+            records.append(new_row)
+
+    if not records:
+        return web_df.iloc[0:0].copy()
+    return pd.DataFrame(records).reset_index(drop=True)
+
+
 class Drawer(ABC):
     """
     Абстрактный класс для генерации отчётов.
@@ -61,16 +122,20 @@ class MergeDrawer(Drawer):
 
     def _merge_content(self) -> pd.DataFrame:
         """
-        Объединяет два DataFrame по ключевым колонкам.
+        Объединяет два DataFrame, сопоставляя записи в первую очередь по номеру
+        задачи в Битрикс ('ID' <-> '№ задачи в Битрикс'), и только затем проверяя,
+        совпадает ли название/описание узла ('Название' <-> 'Опытный узел').
 
-        Выполняет следующие шаги:
-        1. Оставляет только нужные колонки, указанные в конфиге.
-        2. Нормализует данные: обрезает строки, заполняет пропуски.
-        3. Объединяет таблицы по полям 'Название' и 'Опытный узел'.
-        4. Удаляет дублирующиеся колонки, если они есть.
-        5. Заполняет оставшиеся пропуски.
+        Строки, где номер и название совпали, попадают в основной отчёт.
+        Остальные случаи откладываются в self.conflicts_df для листа "Конфликты":
+        - номер не найден совсем (в любую сторону) — один цвет;
+        - номер найден, но название/описание не совпадает — другой цвет.
 
-        :return: Объединённый DataFrame.
+        Если несколько задач указаны в одной строке служебного отчёта, при
+        формировании листа "Конфликты" их названия объединяются через запятую,
+        а номера задач — через пробел.
+
+        :return: DataFrame с успешно сопоставленными строками.
         """
         # Загружаемнужные колонки из битркса
         bitrix_cols = self.config['bitrix_columns']
@@ -80,30 +145,24 @@ class MergeDrawer(Drawer):
         # Их названия записывают в описание задачи
         # Описания начинающиеся с "ПЭ: " ставим в названия
         self.bitrix_df[['Название', 'Описание']] = self.bitrix_df.apply(
-            lambda row: (row['Описание'], row['Название']) 
-            if str(row['Описание']).startswith('ПЭ: ') 
+            lambda row: (row['Описание'], row['Название'])
+            if str(row['Описание']).startswith('ПЭ: ')
             else (row['Название'], row['Описание']),
             axis=1,
             result_type='expand'
         )
-        """self.bitrix_df = (
-            self.bitrix_df
-            .assign(Описание=self.bitrix_df['Описание'].str.split('; '))
-            .explode('Описание')
-        )
-
-        self.bitrix_df = (
-            self.bitrix_df
-            .assign(Название=self.bitrix_df['Название'].str.split('; '))
-            .explode('Название')
-        )"""
 
         # Нормализация
         self.bitrix_df['Название'] = self.bitrix_df['Название'].apply(
             lambda x: x[4:] if str(x).startswith('ПЭ: ') else x
         )
-      
-        
+        self.bitrix_df['ID'] = self.bitrix_df['ID'].apply(_normalize_task_number)
+
+        # Запоминаем задачи в исходном (неразбитом по бюро/узлам) виде —
+        # нужно для листа "Конфликты" (задачи Битрикса, которых нет в отчете совсем)
+        self.bitrix_df = self.bitrix_df.reset_index(drop=True)
+        bitrix_raw = self.bitrix_df.copy()
+
         # Разделяем задачи по бюро
         self.bitrix_df = (
             self.bitrix_df
@@ -120,7 +179,7 @@ class MergeDrawer(Drawer):
         )
         # Удаляем пустые и "только пробелы" после разбивки
         self.bitrix_df = self.bitrix_df[
-            self.bitrix_df['Название'].notna() & 
+            self.bitrix_df['Название'].notna() &
             (self.bitrix_df['Название'].str.strip() != '')
         ].copy()
         self.bitrix_df['Название'] = self.bitrix_df['Название'].str.strip()
@@ -130,28 +189,150 @@ class MergeDrawer(Drawer):
         self.web_df["ПЭ: Комментарий"] = self.web_df["ПЭ: Комментарий"].fillna(
             value='-'
         )
-        
-        self.web_df = (
-            self.web_df
-            .assign(**{'Опытный узел': self.web_df['Опытный узел'].str.split('; ')})
-            .explode('Опытный узел')
-        )
-        
-        
+
+        # Запоминаем строки отчета в исходном (неразбитом) виде —
+        # нужно для листа "Конфликты" (несколько задач в одной строке
+        # объединяются в вывод через запятую/пробел)
+        self.web_df = self.web_df.reset_index(drop=True)
+        self.web_df['_web_row_id'] = self.web_df.index
+        web_raw = self.web_df.copy()
+
+        # Разносим составные строки: несколько опытных узлов и/или номеров
+        # задач в одной строке разбиваются на отдельные строки попарно
+        self.web_df = _explode_web_tasks(self.web_df)
         self.web_df[['№ трактора', 'Опытный узел']] = self.web_df[['№ трактора', 'Опытный узел']].ffill()
 
-        # Объединяем битрикс и веб по полям 'Название' и 'Опытный узел'
-        result_df = pd.merge(
-            self.bitrix_df,
-            self.web_df,
-            left_on='Название',
-            right_on='Опытный узел',
-            #how='right',
-            how='left',
-            suffixes=('_bitrix', '')  # правый без суффикса
-        )
+        # Группируем задачи Битрикса по номеру: у одной задачи может быть
+        # несколько узлов (составное название) и несколько строк-бюро
+        bitrix_by_number: Dict[str, List[pd.Series]] = {}
+        for _, brow in self.bitrix_df.iterrows():
+            number = brow['ID']
+            if not number:
+                continue
+            bitrix_by_number.setdefault(number, []).append(brow)
+
+        matched_rows = []
+        conflict_records = []
+
+        for _, wrow in self.web_df.iterrows():
+            number = wrow['№ задачи в Битрикс']
+            node = wrow['Опытный узел']
+            candidates = bitrix_by_number.get(number) if number else None
+
+            if not candidates:
+                conflict_records.append({
+                    'reason': 'not_found',
+                    'source': 'web',
+                    'web_row_id': wrow['_web_row_id'],
+                    'number': number,
+                    'node': node,
+                })
+                continue
+
+            matches = [b for b in candidates if _norm_text(b['Название']) == _norm_text(node)]
+            if matches:
+                for match in matches:
+                    combined = match.to_dict()
+                    combined.update(wrow.to_dict())
+                    matched_rows.append(combined)
+            else:
+                conflict_records.append({
+                    'reason': 'mismatch',
+                    'source': 'web',
+                    'web_row_id': wrow['_web_row_id'],
+                    'number': number,
+                    'node': node,
+                    'bitrix_names': [b['Название'] for b in candidates],
+                })
+
+        # Задачи Битрикса, номер которых вообще ни разу не встретился в отчете
+        referenced_numbers = {n for n in self.web_df['№ задачи в Битрикс'].tolist() if n}
+        for _, brow in bitrix_raw.iterrows():
+            if brow['ID'] and brow['ID'] not in referenced_numbers:
+                conflict_records.append({
+                    'reason': 'not_found',
+                    'source': 'bitrix',
+                    'number': brow['ID'],
+                    'name': brow['Название'],
+                    'note': brow['Примечание'],
+                    'tags': brow['Теги'],
+                })
+
+        self.conflict_records = conflict_records
+        self.conflicts_df = self._build_conflicts_df(web_raw)
+
+        if matched_rows:
+            result_df = pd.DataFrame(matched_rows)
+        else:
+            result_df = pd.DataFrame(columns=list(self.bitrix_df.columns) + list(self.web_df.columns))
 
         return result_df
+
+    def _build_conflicts_df(self, web_raw: pd.DataFrame) -> pd.DataFrame:
+        """
+        Строит таблицу для листа "Конфликты" на основе self.conflict_records.
+
+        Несколько проблемных задач/узлов, относящихся к одной исходной строке
+        служебного отчета, объединяются в одну строку конфликта: названия узлов
+        через запятую, номера задач — через пробел.
+        """
+        web_raw_by_id = web_raw.set_index('_web_row_id')
+
+        reason_label = {
+            'not_found': 'Номер задачи не найден в Битрикс',
+            'mismatch': 'Название узла не совпадает с задачей в Битрикс',
+        }
+
+        web_groups: Dict[tuple, dict] = {}
+        for rec in self.conflict_records:
+            if rec['source'] != 'web':
+                continue
+            key = (rec['web_row_id'], rec['reason'])
+            group = web_groups.setdefault(key, {'numbers': [], 'nodes': [], 'bitrix_names': []})
+            if rec['number']:
+                group['numbers'].append(rec['number'])
+            if rec['node']:
+                group['nodes'].append(str(rec['node']).strip())
+            if rec.get('bitrix_names'):
+                group['bitrix_names'].extend(rec['bitrix_names'])
+
+        rows = []
+        for (web_row_id, reason), group in web_groups.items():
+            raw = web_raw_by_id.loc[web_row_id]
+            numbers = list(dict.fromkeys(group['numbers']))
+            nodes = list(dict.fromkeys(group['nodes']))
+            bitrix_names = list(dict.fromkeys(group['bitrix_names']))
+            rows.append({
+                'Источник': 'СЛУЖЕБНЫЙ',
+                'Причина': reason_label[reason],
+                '№ задачи': ' '.join(numbers),
+                'Опытный узел': ', '.join(nodes),
+                'Название в Битрикс': ', '.join(bitrix_names),
+                '№ трактора': raw.get('№ трактора'),
+                'Модель трактора': raw.get('Модель трактора'),
+                'Наработка, м/ч': raw.get('Наработка, м/ч'),
+                'ПЭ: Комментарий': raw.get('ПЭ: Комментарий'),
+                '_reason_code': reason,
+            })
+
+        for rec in self.conflict_records:
+            if rec['source'] != 'bitrix':
+                continue
+            rows.append({
+                'Источник': 'БИТРИКС',
+                'Причина': 'Номер задачи не встречается в служебном отчете',
+                '№ задачи': rec['number'],
+                'Опытный узел': '',
+                'Название в Битрикс': rec['name'],
+                'Бюро': rec.get('tags'),
+                'Продолжительность контроля, м/ч': rec.get('note'),
+                '_reason_code': 'not_found',
+            })
+
+        if not rows:
+            return pd.DataFrame({'Статус': ['Конфликтов не найдено']})
+
+        return pd.DataFrame(rows)
 
     def _format_excel_report(self, group_col_name: str, output_file: str) -> None:
             """
@@ -433,74 +614,50 @@ class MergeDrawer(Drawer):
             })
 
 
+    # Цвета подсветки строк в листе "Конфликты":
+    # not_found — номер задачи вообще не найден (в любую сторону);
+    # mismatch — номер найден, но название/описание узла не совпадает.
+    CONFLICT_COLORS = {
+        'not_found': {'bg_color': '#FFC7CE', 'font_color': '#9C0006'},
+        'mismatch': {'bg_color': '#FFEB9C', 'font_color': '#9C6500'},
+    }
+
     def _create_conflict_sheet(self, writer):
-        bitrix_names = self.bitrix_df['Название'].astype(str).str.strip()
-        web_nodes = self.web_df['Опытный узел'].astype(str).str.strip()
+        conflicts_df = self.conflicts_df
+        display_df = conflicts_df.drop(columns=['_reason_code'], errors='ignore')
 
-        bitrix_valid_mask = bitrix_names.ne('') & bitrix_names.ne('nan')
-        web_valid_mask = web_nodes.ne('') & web_nodes.ne('nan')
-
-        bitrix_key_set = set(bitrix_names[bitrix_valid_mask].unique())
-        web_key_set = set(web_nodes[web_valid_mask].unique())
-
-        only_bitrix = self.bitrix_df[
-            bitrix_valid_mask & ~bitrix_names.isin(web_key_set)
-        ].copy()
-        only_web = self.web_df[
-            web_valid_mask & ~web_nodes.isin(bitrix_key_set)
-        ].copy()
-
-        conflict_parts = []
-
-        if not only_bitrix.empty:
-            bitrix_cols = [
-                column_name
-                for column_name in ['Название', 'Теги', 'Примечание', 'Описание']
-                if column_name in only_bitrix.columns
-            ]
-            bitrix_conflicts = only_bitrix[bitrix_cols].copy()
-            bitrix_conflicts = bitrix_conflicts.rename(columns={
-                'Название': 'Задача',
-                'Теги': 'Бюро',
-                'Примечание': 'Продолжительность контроля, м/ч',
-            })
-            bitrix_conflicts.insert(0, 'Источник', 'БИТРИКС')
-            bitrix_conflicts.insert(1, 'Причина', 'Нет в служебном отчете')
-            conflict_parts.append(bitrix_conflicts)
-
-        if not only_web.empty:
-            web_cols = [
-                column_name
-                for column_name in ['Опытный узел', '№ трактора', 'Модель трактора', 'Наработка, м/ч', 'ПЭ: Комментарий']
-                if column_name in only_web.columns
-            ]
-            web_conflicts = only_web[web_cols].copy()
-            web_conflicts = web_conflicts.rename(columns={
-                'Опытный узел': 'Задача',
-            })
-            web_conflicts.insert(0, 'Источник', 'СЛУЖЕБНЫЙ')
-            web_conflicts.insert(1, 'Причина', 'Нет в отчете БИТРИКС')
-            conflict_parts.append(web_conflicts)
-
-        if conflict_parts:
-            conflicts_df = pd.concat(conflict_parts, ignore_index=True, sort=False)
-        else:
-            conflicts_df = pd.DataFrame({'Статус': ['Конфликтов не найдено']})
-
-        conflicts_df.to_excel(
+        display_df.to_excel(
             excel_writer=writer,
             sheet_name='Конфликты',
             index=False,
         )
 
         sheet = writer.sheets['Конфликты']
-        sheet.set_column('A:A', 16)
-        sheet.set_column('B:B', 28)
-        sheet.set_column('C:C', 60)
-        sheet.set_column('D:D', 24)
-        sheet.set_column('E:E', 18)
-        sheet.set_column('F:F', 20)
-        sheet.set_column('G:G', 60)
+        sheet.set_column('A:A', 14)
+        sheet.set_column('B:B', 36)
+        sheet.set_column('C:C', 16)
+        sheet.set_column('D:D', 40)
+        sheet.set_column('E:E', 50)
+        sheet.set_column('F:F', 16)
+        sheet.set_column('G:G', 20)
+        sheet.set_column('H:H', 16)
+        sheet.set_column('I:I', 50)
+        sheet.set_column('J:J', 24)
+        sheet.set_column('K:K', 24)
+
+        if '_reason_code' not in conflicts_df.columns:
+            return
+
+        base_format_kwargs = {'text_wrap': True, 'valign': 'vcenter', 'border': 1}
+        formats = {
+            reason: writer.book.add_format({**base_format_kwargs, **colors})
+            for reason, colors in self.CONFLICT_COLORS.items()
+        }
+
+        for row_offset, reason in enumerate(conflicts_df['_reason_code'], start=1):
+            row_format = formats.get(reason)
+            if row_format is not None:
+                sheet.set_row(row_offset, None, row_format)
 
 
     def draw_report(self) -> SuccesSchema:
