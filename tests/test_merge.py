@@ -132,3 +132,37 @@ def test_merge_joins_multiple_tasks_in_one_row_for_conflicts():
     row = web_conflicts.iloc[0]
     assert row['№ задачи'] == '201 202'
     assert row['Опытный узел'] == 'Узел 1, Узел 2'
+
+
+def test_build_conflicts_df_handles_float_task_number():
+    # На реальных данных ячейка '№ задачи в Битрикс' иногда приходит как
+    # обычный float (например, из Excel), не совпадающий ни с одной задачей
+    # Битрикс. Когда в отчете рядом есть строка с пустым номером, колонка
+    # после _explode_web_tasks становится смешанной (str/None), и pandas
+    # приводит None к NaN (float) при сборке DataFrame из списка Series.
+    # Раньше это приводило к TypeError в ' '.join(numbers).
+    bitrix_df = pd.DataFrame({
+        'ID': [999],
+        'Название': ['Не относится к делу'],
+        'Описание': ['-'],
+        'Примечание': ['100 м/ч'],
+        'Теги': ['Бюро А'],
+    })
+
+    web_df = pd.DataFrame({
+        'Опытный узел': ['Узел 1', 'Узел 2'],
+        '№ трактора': [101, 102],
+        'ПЭ: Комментарий': ['-', '-'],
+        '№ задачи в Битрикс': [101.0, None],
+    })
+
+    md = MergeDrawer(web_df=web_df, bitrix_df=bitrix_df, config=_config())
+    result = md._merge_content()
+
+    assert result.empty
+
+    conflicts = md.conflicts_df
+    web_conflicts = conflicts[conflicts['Источник'] == 'СЛУЖЕБНЫЙ']
+    assert len(web_conflicts) == 2
+    assert (web_conflicts['_reason_code'] == 'not_found').all()
+    assert set(web_conflicts['№ задачи']) == {'101', ''}

@@ -3,9 +3,69 @@ from .schemas import ErrorSchema, SuccesSchema
 import pandas as pd
 import json
 import re
+import textwrap
 from .utils import Utils, DataFrameUtils, ExcelUtils
 import os
 from typing import Dict, List, Any
+
+
+# Ширины (в символах) колонок с переносимым текстом — используются как для
+# set_column, так и для расчёта высоты строки, чтобы текст был виден целиком.
+NODE_COL_WIDTH = 56
+COMMENT_COL_WIDTH = 104
+# Ширина шапки листа (объединенные колонки A:E), где выводится полное
+# название опытного узла — сумма ширин колонок A(16)+B(20)+C(56)+D(20)+E(24).
+HEADER_MERGE_WIDTH = 136
+
+# Кириллические символы в Calibri заметно шире цифр, по которым Excel
+# калибрует ширину колонки в "символах" — уменьшаем расчётную ширину строки,
+# чтобы не занижать число строк переноса и не обрезать текст.
+CYRILLIC_WIDTH_FACTOR = 0.6
+
+_KIROVETS_PREFIX_RE = re.compile(r'^Трактор\s*[«"]\s*Кировец\s*[»"]\s*', re.IGNORECASE)
+
+
+def _strip_kirovets_prefix(value):
+    """
+    Убирает лишний префикс 'Трактор "Кировец" ' из модели трактора,
+    например 'Трактор "Кировец" К-743М' -> 'К-743М'.
+    """
+    if pd.isna(value):
+        return value
+    return _KIROVETS_PREFIX_RE.sub('', str(value))
+
+
+def _lines_needed(text, width_chars: int) -> int:
+    """
+    Оценивает, сколько строк займёт текст при переносе по словам в колонке
+    шириной width_chars символов — нужно, чтобы задать высоту строки так,
+    чтобы текст был виден полностью сразу, без ручного растягивания.
+    """
+    if pd.isna(text):
+        return 1
+    text = str(text)
+    if not text:
+        return 1
+    effective_width = max(1, int(width_chars * CYRILLIC_WIDTH_FACTOR))
+    total = 0
+    for part in text.split('\n'):
+        wrapped = textwrap.wrap(part, width=effective_width) or ['']
+        total += len(wrapped)
+    return max(total, 1)
+
+
+def _write_date_column(worksheet, start_row: int, col_idx: int, series, cell_format) -> None:
+    """
+    Перезаписывает колонку явными датами Excel (вместо текста), сохраняя
+    при этом формат ячейки (границы, выравнивание, формат даты).
+    """
+    parsed = pd.to_datetime(series, dayfirst=True, errors='coerce')
+    for row_offset, value in enumerate(parsed):
+        excel_row = start_row + row_offset
+        if pd.isna(value):
+            worksheet.write_blank(excel_row, col_idx, None, cell_format)
+        else:
+            worksheet.write_datetime(excel_row, col_idx, value.to_pydatetime(), cell_format)
 
 
 def _normalize_task_number(value) -> str | None:
@@ -189,6 +249,8 @@ class MergeDrawer(Drawer):
         self.web_df["ПЭ: Комментарий"] = self.web_df["ПЭ: Комментарий"].fillna(
             value='-'
         )
+        if 'Модель трактора' in self.web_df.columns:
+            self.web_df['Модель трактора'] = self.web_df['Модель трактора'].apply(_strip_kirovets_prefix)
 
         # Запоминаем строки отчета в исходном (неразбитом) виде —
         # нужно для листа "Конфликты" (несколько задач в одной строке
@@ -289,8 +351,9 @@ class MergeDrawer(Drawer):
                 continue
             key = (rec['web_row_id'], rec['reason'])
             group = web_groups.setdefault(key, {'numbers': [], 'nodes': [], 'bitrix_names': []})
-            if rec['number']:
-                group['numbers'].append(rec['number'])
+            number = _normalize_task_number(rec['number'])
+            if number:
+                group['numbers'].append(number)
             if rec['node']:
                 group['nodes'].append(str(rec['node']).strip())
             if rec.get('bitrix_names'):
@@ -362,6 +425,7 @@ class MergeDrawer(Drawer):
 
                     sheet_name = str(name).replace(':', '').replace('\\', '').replace('/', '')[:31]
                     format_dict = {}
+                    header_format_dict = {}
 
                     # рассчитываем статистику в шапке
                     name_counts = (
@@ -418,14 +482,17 @@ class MergeDrawer(Drawer):
                     header_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=0)
                     worksheet = writer.sheets[sheet_name]
 
-                    # Форматируем шапку
+                    # Форматируем шапку — название опытного узла переносится
+                    # по строкам, высота строки подбирается под текст целиком
                     for row_offset, value in enumerate(header_df['Опытный узел'], start=1):
                         color = ExcelUtils.get_cell_color(value)
-                        if color not in format_dict:
-                            format_dict[color] = writer.book.add_format({
-                                'bg_color': color, 
+                        if color not in header_format_dict:
+                            header_format_dict[color] = writer.book.add_format({
+                                'bg_color': color,
                                 'valign': 'vcenter',
+                                'align': 'center',
                                 'border': 1,
+                                'text_wrap': True,
                                 })
                         worksheet.merge_range(
                             first_row=0 + row_offset,
@@ -433,7 +500,11 @@ class MergeDrawer(Drawer):
                             last_row=0 + row_offset,
                             last_col=4,
                             data=value,
-                            cell_format=format_dict[color],
+                            cell_format=header_format_dict[color],
+                        )
+                        worksheet.set_row(
+                            0 + row_offset,
+                            _lines_needed(value, HEADER_MERGE_WIDTH) * 15,
                         )
 
                     # Создаем формат заголовков
@@ -477,17 +548,18 @@ class MergeDrawer(Drawer):
                     start_row = len(name_counts) + 4
                     worksheet.set_column('A:A', 16)
                     worksheet.set_column('B:B', 20)
-                    worksheet.set_column('C:C', 56)
-                    worksheet.set_column('D:D', 18)
+                    worksheet.set_column('C:C', NODE_COL_WIDTH)
+                    worksheet.set_column('D:D', 20)
                     worksheet.set_column('E:E', 24)
                     worksheet.set_column('F:F', 12)
                     worksheet.set_column('G:G', 20)
-                    worksheet.set_column('H:H', 104)
+                    worksheet.set_column('H:H', COMMENT_COL_WIDTH)
                     worksheet.set_column('I:I', 18)
+                    worksheet.set_column('J:J', 20)
 
                     # Убираем колонку бюро из таблицы
                     group = group.drop(columns=['Бюро'])
-                    
+
                     # Заполняем заголовок главной таблицы
                     for i, col in enumerate(group.columns):
                         worksheet.write(
@@ -496,7 +568,15 @@ class MergeDrawer(Drawer):
                             col,
                             header_format,
                         )
-                    
+
+                    # Фильтры по всем колонкам главной таблицы
+                    worksheet.autofilter(
+                        start_row - 1,
+                        0,
+                        start_row - 1 + group.shape[0],
+                        len(group.columns) - 1,
+                    )
+
                     # Записываем главную таблицу
                     group.to_excel(
                         writer,
@@ -518,6 +598,7 @@ class MergeDrawer(Drawer):
                             format_dict[color] = writer.book.add_format({
                                 'bg_color': color,
                                 'valign': 'vcenter',
+                                'align': 'center',
                                 'border': 1,
                                 'text_wrap': True
                                 })
@@ -527,14 +608,47 @@ class MergeDrawer(Drawer):
                     cell_format = writer.book.add_format({
                         'text_wrap': True,
                         'valign': 'vcenter',
+                        'align': 'center',
                         'border': 1,
                     })
 
-                    for i in range(start_row, group.shape[0]+start_row):
+                    # Высота строки подбирается так, чтобы опытный узел и
+                    # комментарий были видны целиком, без ручного растягивания
+                    comments = group['ПЭ: Комментарий'] if 'ПЭ: Комментарий' in group.columns else None
+                    for row_offset, node_value in enumerate(group['Опытный узел']):
+                        comment_value = comments.iloc[row_offset] if comments is not None else ''
+                        lines = max(
+                            _lines_needed(node_value, NODE_COL_WIDTH),
+                            _lines_needed(comment_value, COMMENT_COL_WIDTH),
+                        )
                         worksheet.set_row(
-                            i,
-                            None,
+                            start_row + row_offset,
+                            lines * 15,
                             cell_format,
+                        )
+
+                    # Переписываем даты как настоящие даты Excel (а не текст)
+                    date_format = writer.book.add_format({
+                        'border': 1, 'align': 'center', 'valign': 'vcenter', 'num_format': 'dd.mm.yyyy',
+                    })
+                    datetime_format = writer.book.add_format({
+                        'border': 1, 'align': 'center', 'valign': 'vcenter', 'num_format': 'dd.mm.yyyy hh:mm',
+                    })
+                    if 'Дата и время обращения' in group.columns:
+                        _write_date_column(
+                            worksheet,
+                            start_row,
+                            group.columns.get_loc('Дата и время обращения'),
+                            group['Дата и время обращения'],
+                            datetime_format,
+                        )
+                    if 'Граничная дата гарантии' in group.columns:
+                        _write_date_column(
+                            worksheet,
+                            start_row,
+                            group.columns.get_loc('Граничная дата гарантии'),
+                            group['Граничная дата гарантии'],
+                            date_format,
                         )
     def _create_stats_sheet(self, writer):
         # Общая статистика
@@ -645,10 +759,13 @@ class MergeDrawer(Drawer):
         sheet.set_column('J:J', 24)
         sheet.set_column('K:K', 24)
 
+        # Фильтры по всем колонкам
+        sheet.autofilter(0, 0, len(display_df), len(display_df.columns) - 1)
+
         if '_reason_code' not in conflicts_df.columns:
             return
 
-        base_format_kwargs = {'text_wrap': True, 'valign': 'vcenter', 'border': 1}
+        base_format_kwargs = {'text_wrap': True, 'valign': 'vcenter', 'align': 'center', 'border': 1}
         formats = {
             reason: writer.book.add_format({**base_format_kwargs, **colors})
             for reason, colors in self.CONFLICT_COLORS.items()
@@ -761,11 +878,26 @@ class FormatDrawer(Drawer):
             worksheet.set_column('C:C', 16)
             worksheet.set_column('D:D', 16)
             worksheet.set_column('E:E', 24)
-            worksheet.set_column('F:F', 56)
+            worksheet.set_column('F:F', NODE_COL_WIDTH)
             worksheet.set_column('G:G', 20)
-            worksheet.set_column('H:H', 104)
+            worksheet.set_column('H:H', COMMENT_COL_WIDTH)
             worksheet.set_column('I:I', 24)
             worksheet.set_column('J:J', 24)
+            worksheet.set_column('K:K', 20)
+
+            # Фильтры по всем колонкам
+            worksheet.autofilter(0, 0, len(result_df), len(result_df.columns) - 1)
+
+            # Заголовок
+            header_format = writer.book.add_format({
+                'bold': True,
+                'align': 'center',
+                'valign': 'vcenter',
+                'border': 1,
+                'text_wrap': True,
+            })
+            for col_idx, col in enumerate(result_df.columns):
+                worksheet.write(0, col_idx, col, header_format)
 
             # Задаем форматирование для всех строк
             cell_format = writer.book.add_format({
@@ -775,12 +907,45 @@ class FormatDrawer(Drawer):
                 'align': 'center',
             })
 
-            # Применяем форматирование ко всем строкам
-            for i in range(1, self.format_df.shape[0]):
+            node_col = result_df['Опытный узел'] if 'Опытный узел' in result_df.columns else None
+            comment_col = result_df['ПЭ: Комментарий'] if 'ПЭ: Комментарий' in result_df.columns else None
+
+            # Применяем форматирование ко всем строкам данных, подбирая высоту
+            # строки так, чтобы опытный узел и комментарий были видны целиком
+            for row_offset in range(len(result_df)):
+                lines = 1
+                if node_col is not None:
+                    lines = max(lines, _lines_needed(node_col.iloc[row_offset], NODE_COL_WIDTH))
+                if comment_col is not None:
+                    lines = max(lines, _lines_needed(comment_col.iloc[row_offset], COMMENT_COL_WIDTH))
                 worksheet.set_row(
-                    i,
-                    None,
+                    row_offset + 1,
+                    lines * 15,
                     cell_format,
+                )
+
+            # Переписываем даты как настоящие даты Excel (а не текст)
+            date_format = writer.book.add_format({
+                'border': 1, 'align': 'center', 'valign': 'vcenter', 'num_format': 'dd.mm.yyyy',
+            })
+            datetime_format = writer.book.add_format({
+                'border': 1, 'align': 'center', 'valign': 'vcenter', 'num_format': 'dd.mm.yyyy hh:mm',
+            })
+            if 'Дата и время обращения' in result_df.columns:
+                _write_date_column(
+                    worksheet,
+                    1,
+                    result_df.columns.get_loc('Дата и время обращения'),
+                    result_df['Дата и время обращения'],
+                    datetime_format,
+                )
+            if 'Граничная дата гарантии' in result_df.columns:
+                _write_date_column(
+                    worksheet,
+                    1,
+                    result_df.columns.get_loc('Граничная дата гарантии'),
+                    result_df['Граничная дата гарантии'],
+                    date_format,
                 )
 
     def draw_report(self):
@@ -796,6 +961,10 @@ class FormatDrawer(Drawer):
         :return: Объект `SuccesSchema`, содержащий сообщение и ссылку на скачивание.
         :rtype: SuccesSchema
         """
+        if 'Модель трактора' in self.format_df.columns:
+            self.format_df = self.format_df.copy()
+            self.format_df['Модель трактора'] = self.format_df['Модель трактора'].apply(_strip_kirovets_prefix)
+
         self.result_df = DataFrameUtils.reformat_dataframe(
             df=self.format_df,
             column_map=self.config['format_column_map'],
